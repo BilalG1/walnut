@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: walnut-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: walnut
+      POSTGRES_PASSWORD: walnut
+      POSTGRES_DB: walnut
+    ports:
+      # host:container — platform metadata DB exposed on 3002
+      - "3002:5432"
+    volumes:
+      - walnut-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U walnut -d walnut"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  walnut-pgdata:

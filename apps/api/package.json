@@ -1,0 +1,27 @@
+{
+  "name": "@walnut/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./app": "./src/app.ts",
+    "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "1.4.2",
+    "@walnut/core": "workspace:*",
+    "@walnut/db": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "elysia": "1.4.28"
+  },
+  "devDependencies": {
+    "@elysiajs/eden": "1.4.9",
+    "postgres": "3.4.9"
+  }
+}
