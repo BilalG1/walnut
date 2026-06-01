@@ -5,7 +5,7 @@
   "type": "module",
   "exports": {
     "./app": "./src/app.ts",
-    "./client": "./src/client.ts"
+    "./types": "./src/serializers.ts"
   },
   "scripts": {
     "dev": "bun --watch src/index.ts",

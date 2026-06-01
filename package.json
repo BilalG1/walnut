@@ -13,7 +13,7 @@
     "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix",
     "typecheck": "bun run --filter '*' typecheck",
-    "test": "bun test",
+    "test": "bun run --filter '*' test",
     "db:generate": "bun run --filter @walnut/db generate",
     "db:push": "bun run --filter @walnut/db push",
     "db:migrate": "bun run --filter @walnut/db migrate",
