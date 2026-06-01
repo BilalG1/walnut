@@ -47,6 +47,16 @@ async function dropProjectDatabases(): Promise<void> {
       // eslint-disable-next-line no-await-in-loop
       await admin.unsafe(`DROP DATABASE IF EXISTS "${datname}"`)
     }
+    // Per-project roles are cluster-global, so they outlive the dropped databases.
+    const roles = await admin<{ rolname: string }[]>`
+      SELECT rolname FROM pg_roles WHERE rolname ^@ 'proj_'
+    `
+    for (const { rolname } of roles) {
+      // eslint-disable-next-line no-await-in-loop
+      await admin.unsafe(`DROP OWNED BY "${rolname}"`)
+      // eslint-disable-next-line no-await-in-loop
+      await admin.unsafe(`DROP ROLE IF EXISTS "${rolname}"`)
+    }
   } finally {
     await admin.end({ timeout: 5 })
   }

@@ -261,6 +261,71 @@ describe('agent query scope enforcement', () => {
   })
 })
 
+describe('database-level role enforcement', () => {
+  // The SQL classifier reads the leading keyword, so `SELECT ... INTO` (which
+  // actually creates a table) slips through as db:read. The restricted role is the
+  // backstop: the database engine refuses it because the role lacks CREATE.
+  test('SELECT ... INTO is refused by the role even though the classifier allows it', async () => {
+    const project = await newProject()
+    const agent = await newAgent(project.id)
+    await grant(agent.apiKey, project.id, ['db:read'])
+
+    const res = await h.api.agent.v1.query.post(
+      { sql: 'SELECT 1 AS n INTO leaked_table' },
+      { headers: bearer(agent.apiKey) },
+    )
+    // Passed the classifier (db:read), blocked by the engine → surfaced as query_error.
+    expect(res.status).toBe(400)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('query_error')
+    expect(body?.message.toLowerCase()).toContain('permission denied')
+
+    // And the table was never created.
+    const check = await h.api.agent.v1.query.post(
+      { sql: "SELECT to_regclass('public.leaked_table') AS t" },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(check.data?.rows).toEqual([{ t: null }])
+  })
+
+  test('a read-only agent cannot create large objects (PUBLIC lockdown)', async () => {
+    // `SELECT lo_create(...)` classifies as db:read but writes a large object — the
+    // role lockdown revokes the LO write functions from PUBLIC, so the engine refuses it.
+    const project = await newProject()
+    const agent = await newAgent(project.id)
+    await grant(agent.apiKey, project.id, ['db:read'])
+    const res = await h.api.agent.v1.query.post(
+      { sql: 'SELECT lo_create(0)' },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(400)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('query_error')
+    expect(body?.message.toLowerCase()).toContain('permission denied')
+  })
+
+  test('a read-only agent can read a table created by another agent (group grants flow)', async () => {
+    const project = await newProject()
+    const author = await newAgent(project.id, 'author')
+    await grant(author.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
+    const authorAuth = bearer(author.apiKey)
+    await h.api.agent.v1.query.post(
+      { sql: 'CREATE TABLE shared (id int)' },
+      { headers: authorAuth },
+    )
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO shared VALUES (42)' }, { headers: authorAuth })
+
+    const reader = await newAgent(project.id, 'reader')
+    await grant(reader.apiKey, project.id, ['db:read'])
+    const read = await h.api.agent.v1.query.post(
+      { sql: 'SELECT id FROM shared' },
+      { headers: bearer(reader.apiKey) },
+    )
+    expect(read.status).toBe(200)
+    expect(read.data?.rows).toEqual([{ id: 42 }])
+  })
+})
+
 describe('scope requests', () => {
   test('an agent requests a scope; the dashboard sees it pending and approves it', async () => {
     const project = await newProject()

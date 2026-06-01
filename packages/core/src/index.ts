@@ -23,3 +23,12 @@ export type {
 
 export { runSql } from './query.ts'
 export type { QueryResult } from './query.ts'
+
+export {
+  setupProjectRoles,
+  createAgentRole,
+  syncAgentScopes,
+  dropAgentRole,
+  dropProjectRoles,
+} from './roles.ts'
+export type { AgentRole } from './roles.ts'

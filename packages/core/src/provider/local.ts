@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { newDatabaseName } from '../ids.ts'
+import { dropProjectRoles } from '../roles.ts'
 import type { DatabaseProvider } from './types.ts'
 
 /** Guard against interpolating anything but our own generated db names. */
@@ -52,6 +53,8 @@ export function createLocalProvider(adminUrl: string): DatabaseProvider {
       } finally {
         await admin.end({ timeout: 5 })
       }
+      // Roles are cluster-global, so they outlive the dropped database here.
+      await dropProjectRoles(adminUrl, providerProjectId)
     },
   }
 }

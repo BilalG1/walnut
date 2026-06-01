@@ -8,6 +8,13 @@
       "when": 1780279760249,
       "tag": "0000_cheerful_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780341662738,
+      "tag": "0001_careless_mysterio",
+      "breakpoints": true
     }
   ]
 }

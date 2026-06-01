@@ -40,9 +40,14 @@ export async function runAgentQuery(project: Project, agent: Agent, sql: string)
     })
   }
 
+  // Run over the agent's own restricted role when it has one (defense in depth:
+  // the database engine backs up the classifier). Fall back to the owner
+  // connection only for pre-roles agents created before this existed.
+  const connectionUri = agent.connectionUri ?? project.connectionUri
+
   let result: QueryResult
   try {
-    result = await runSql(project.connectionUri, sql)
+    result = await runSql(connectionUri, sql)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Query failed'
     throw new HttpError(400, { error: 'query_error', message })

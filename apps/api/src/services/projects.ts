@@ -1,4 +1,4 @@
-import { SYSTEM_USER_ID } from '@walnut/core'
+import { type ProvisionedDatabase, SYSTEM_USER_ID, setupProjectRoles } from '@walnut/core'
 import { projects, type Project } from '@walnut/db'
 import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
@@ -47,8 +47,12 @@ export async function createProject(ctx: AppContext, input: { name: string }): P
     throw new HttpError(500, { error: 'internal_error', message: 'Failed to create project.' })
   }
 
+  let provisioned: ProvisionedDatabase | undefined
   try {
-    const provisioned = await ctx.provider.provision({ name: input.name })
+    provisioned = await ctx.provider.provision({ name: input.name })
+    // Establish the per-scope group roles before the database is used, so every
+    // agent connection is enforced by the engine and not just the SQL classifier.
+    await setupProjectRoles(provisioned.connectionUri)
     const [updated] = await ctx.db
       .update(projects)
       .set({
@@ -62,6 +66,13 @@ export async function createProject(ctx: AppContext, input: { name: string }): P
     return updated ?? created
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown provisioning error'
+    // If the database was created but a later step failed, tear it down so we don't
+    // leak an orphaned database (its metadata row never records providerProjectId).
+    if (provisioned !== undefined) {
+      await ctx.provider
+        .destroy(provisioned.providerProjectId)
+        .catch((e) => console.error(`Failed to clean up orphaned database for project ${created.id}:`, e))
+    }
     await ctx.db.update(projects).set({ status: 'error', error: message }).where(eq(projects.id, created.id))
     throw new HttpError(502, {
       error: 'provisioning_failed',

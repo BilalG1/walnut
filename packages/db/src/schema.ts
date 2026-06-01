@@ -40,6 +40,11 @@ export const agents = pgTable('agents', {
   /** Non-secret prefix kept for display. */
   keyPrefix: text('key_prefix').notNull(),
   scopes: jsonb('scopes').$type<AgentScope[]>().notNull().default([]),
+  /** The agent's own restricted Postgres role (null for pre-roles agents). */
+  dbRole: text('db_role'),
+  /** Connection string scoped to the agent's restricted role; queries run over this,
+   * never the project owner connection. Null for pre-roles agents. */
+  connectionUri: text('connection_uri'),
   createdAt,
 })
 
