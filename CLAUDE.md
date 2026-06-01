@@ -68,20 +68,30 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 - **Scopes** are strings, currently DB-only: `db:read`, `db:write`, `db:delete`, `db:ddl`
   (defined in `packages/core/src/scopes.ts`). The union type is deliberately open so future
   domains (`fn:deploy`, `email:send`, `logs:read`) drop in without a schema change.
-- **Enforcement:** `POST /agent/v1/query` runs `classifySql` (`packages/core/src/sql.ts`),
-  which maps a statement to the scope(s) it needs (multi-statement and writable-CTE aware,
-  literal/comment/dollar-quote safe). Missing a scope → **403 with a clear, machine-readable
-  body** telling the agent what it lacks and how to request it.
+- **Enforcement is two layers (defense in depth):**
+  1. **Engine boundary (primary):** each agent gets its own restricted Postgres **login role**,
+     a member of four per-project `NOLOGIN` group roles (`_read/_write/_delete/_ddl`). Agent
+     queries run over the **agent's scoped connection** (`agents.connection_uri`), never the
+     project owner connection, so the database itself refuses anything ungranted. Role lifecycle
+     lives in `packages/core/src/roles.ts`; approval/denial = `GRANT`/`REVOKE` group membership.
+  2. **Classifier (first guard + UX):** `POST /agent/v1/query` runs `classifySql`
+     (`packages/core/src/sql.ts`), which parses with the **real PostgreSQL grammar**
+     (`pgsql-parser`/libpg_query) and maps each statement's AST to the scope(s) it needs. Missing
+     a scope → **403 with a clear, machine-readable body** telling the agent what it lacks and how
+     to request it. This drives the approval loop; it can now fail open without being a breach
+     because the engine enforces — but it still **fails safe** (unknown/unparsed statement →
+     `db:ddl`) so it never under-reports.
 - **Approval loop:** an agent calls `POST /agent/v1/scope-requests`; the request appears as a
   dashboard notification; the user approves/denies (`/api/scope-requests/:id/approve|deny`).
-  Approval merges the scopes into the agent.
-- **Classifier is the sole guard (for now).** Agent queries currently run over the project's
-  **owner** connection, so `classifySql` is the only thing stopping a privileged op. It's written
-  to fail safe (unknown leading keyword → `db:ddl`) and handles the nasty cases —
-  multi-statement batches, writable CTEs, `EXPLAIN ANALYZE` (which *executes*), `SET ROLE`,
-  `COPY … FROM PROGRAM`, comments, string/dollar-quote literals. **If you add SQL features,
-  add classifier tests for them.** Defense-in-depth TODO: provision a restricted per-agent
-  Postgres role so DB privileges back up the classifier.
+  Approval merges the scopes into the agent **and** syncs its Postgres role memberships.
+- **The classifier** is multi-statement and writable-CTE aware and handles the nasty cases —
+  `EXPLAIN ANALYZE` (which *executes*), `SELECT … INTO` (a CTAS), `SET ROLE`, `COPY … FROM PROGRAM`,
+  `MERGE`, comments, string/dollar-quote literals — by working from the AST, not a token scan.
+  **If you add SQL features, add classifier tests for them** (`packages/core/test/sql.test.ts`).
+  Known remaining gaps are covered by the engine, not the classifier: side-effecting functions in
+  read position (e.g. a write-performing UDF in a `SELECT`) classify as `db:read` but are refused
+  by the role. `db:ddl` ownership of agent-created objects is the rough edge (schema-level `CREATE`
+  + per-agent default privileges; no superuser-only event triggers, so it works on Neon).
 
 ## Designed-for (not built yet) — keep these in mind
 

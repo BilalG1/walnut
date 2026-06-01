@@ -19,7 +19,7 @@ export async function runAgentQuery(project: Project, agent: Agent, sql: string)
     })
   }
 
-  const classification = classifySql(sql)
+  const classification = await classifySql(sql)
   if (classification.empty) {
     throw new HttpError(400, { error: 'empty_query', message: 'SQL statement is empty.' })
   }

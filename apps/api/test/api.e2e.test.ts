@@ -262,10 +262,11 @@ describe('agent query scope enforcement', () => {
 })
 
 describe('database-level role enforcement', () => {
-  // The SQL classifier reads the leading keyword, so `SELECT ... INTO` (which
-  // actually creates a table) slips through as db:read. The restricted role is the
-  // backstop: the database engine refuses it because the role lacks CREATE.
-  test('SELECT ... INTO is refused by the role even though the classifier allows it', async () => {
+  // `SELECT ... INTO` actually creates a table. A leading-keyword scan would pass it as
+  // db:read; the real-grammar classifier sees the CTAS and requires db:ddl, so a
+  // read-only agent is denied at the classifier (and, were it to slip through, the
+  // restricted role lacks CREATE — see the large-object test for that engine backstop).
+  test('SELECT ... INTO is classified as DDL and denied for a read-only agent', async () => {
     const project = await newProject()
     const agent = await newAgent(project.id)
     await grant(agent.apiKey, project.id, ['db:read'])
@@ -274,11 +275,10 @@ describe('database-level role enforcement', () => {
       { sql: 'SELECT 1 AS n INTO leaked_table' },
       { headers: bearer(agent.apiKey) },
     )
-    // Passed the classifier (db:read), blocked by the engine → surfaced as query_error.
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(403)
     const body = res.error?.value as ErrorBody | undefined
-    expect(body?.error).toBe('query_error')
-    expect(body?.message.toLowerCase()).toContain('permission denied')
+    expect(body?.error).toBe('insufficient_scope')
+    expect(body?.missingScopes).toEqual(['db:ddl'])
 
     // And the table was never created.
     const check = await h.api.agent.v1.query.post(

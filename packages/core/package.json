@@ -12,6 +12,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "pgsql-parser": "^17.9.15",
     "postgres": "3.4.9"
   }
 }

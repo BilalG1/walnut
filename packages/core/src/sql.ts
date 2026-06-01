@@ -1,52 +1,17 @@
+import { parse } from 'pgsql-parser'
 import type { DbScope } from './scopes.ts'
 
 /**
- * Maps a leading SQL keyword to the scope its operation requires. Scopes are
- * independent capabilities (an agent can hold `db:delete` without `db:ddl`), so
- * a statement is classified by the *operations it performs*, not a privilege
- * ladder. A statement (or batch) may require several scopes at once.
+ * Maps a statement to the scope(s) it requires, using the *real* PostgreSQL
+ * grammar (libpg_query via pgsql-parser) rather than a token scan. Working from
+ * an AST means comments, string/dollar-quoted literals, quoted identifiers and
+ * nested statements are handled by the parser, not by hand.
+ *
+ * Since per-agent Postgres roles now enforce scopes at the database engine
+ * (see roles.ts), this classifier is the *first* guard and the UX layer that
+ * powers the scope-request approval loop — not the sole boundary. It still fails
+ * safe (unknown/unmapped statement → db:ddl) so it never under-reports.
  */
-const KEYWORD_SCOPE: Record<string, DbScope> = {
-  // read / utility (baseline access)
-  SELECT: 'db:read',
-  TABLE: 'db:read',
-  VALUES: 'db:read',
-  SHOW: 'db:read',
-  EXPLAIN: 'db:read',
-  FETCH: 'db:read',
-  SET: 'db:read',
-  RESET: 'db:read',
-  BEGIN: 'db:read',
-  START: 'db:read',
-  COMMIT: 'db:read',
-  END: 'db:read',
-  ROLLBACK: 'db:read',
-  SAVEPOINT: 'db:read',
-  RELEASE: 'db:read',
-  // write
-  INSERT: 'db:write',
-  UPDATE: 'db:write',
-  MERGE: 'db:write',
-  COPY: 'db:write',
-  UPSERT: 'db:write',
-  // delete
-  DELETE: 'db:delete',
-  TRUNCATE: 'db:delete',
-  // ddl / privileged
-  CREATE: 'db:ddl',
-  ALTER: 'db:ddl',
-  DROP: 'db:ddl',
-  RENAME: 'db:ddl',
-  GRANT: 'db:ddl',
-  REVOKE: 'db:ddl',
-  COMMENT: 'db:ddl',
-  VACUUM: 'db:ddl',
-  ANALYZE: 'db:ddl',
-  REINDEX: 'db:ddl',
-  CLUSTER: 'db:ddl',
-  REFRESH: 'db:ddl',
-  LOCK: 'db:ddl',
-}
 
 export interface SqlClassification {
   /** True when the input is empty / only comments. */
@@ -59,140 +24,237 @@ export interface SqlClassification {
   requiredScopes: DbScope[]
 }
 
-/** Remove comments and neutralise string/identifier literals so a token scan
- * doesn't trip over a column named `delete`, the text `'DROP'` in a value, or a
- * stray `;` inside a dollar-quoted function body. */
-function stripSqlNoise(sql: string): string {
-  return sql
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\$(\w*)\$[\s\S]*?\$\1\$/g, ' ')
-    .replace(/'(?:''|[^'])*'/g, "''")
-    .replace(/"(?:""|[^"])*"/g, '""')
+/** Minimal view of the parse tree we depend on (the full AST is a large union). */
+interface RawStmt {
+  stmt?: unknown
+}
+interface ParseTree {
+  stmts?: RawStmt[]
 }
 
-/** EXPLAIN's own option words — skipped when scanning an EXPLAIN body so e.g. the
- * `ANALYZE` option doesn't get mistaken for a standalone `ANALYZE` (db:ddl). */
-const EXPLAIN_OPTION_TOKENS: ReadonlySet<string> = new Set([
-  'ANALYZE', 'VERBOSE', 'COSTS', 'SETTINGS', 'GENERIC', 'PLAN', 'BUFFERS', 'WAL',
-  'TIMING', 'SUMMARY', 'FORMAT', 'MEMORY', 'SERIALIZE', 'TEXT', 'XML', 'JSON',
-  'YAML', 'ON', 'OFF', 'TRUE', 'FALSE',
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/** Statement *node types* are PascalCase + `Stmt` (e.g. `SelectStmt`); plain fields like
+ * `selectStmt` are camelCase and must not be mistaken for nested statements. */
+function isStmtNodeType(key: string): boolean {
+  return /^[A-Z]\w*Stmt$/.test(key)
+}
+
+/** Unwrap a node like `{ SelectStmt: {...} }` into its type tag and body. */
+function unwrap(node: unknown): { type: string; body: Record<string, unknown> } | null {
+  if (!isRecord(node)) {
+    return null
+  }
+  const type = Object.keys(node)[0]
+  if (type === undefined) {
+    return null
+  }
+  const body = node[type]
+  return { type, body: isRecord(body) ? body : {} }
+}
+
+/** Statement nodes that need only read access (beyond SELECT and SET, handled inline). */
+const READ_NODES: ReadonlySet<string> = new Set([
+  'VariableShowStmt', // SHOW
+  'TransactionStmt', // BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE
+  'DeclareCursorStmt', // DECLARE ... CURSOR
+  'FetchStmt', // FETCH / MOVE
+  'ClosePortalStmt', // CLOSE
 ])
 
-/** Add every non-read scope implied by the statement's keywords. */
-function addModifyingScopes(tokens: readonly string[], scopes: Set<DbScope>, skip?: ReadonlySet<string>): void {
-  for (const token of tokens) {
-    if (skip?.has(token) === true) {
-      continue
-    }
-    const scope = KEYWORD_SCOPE[token]
-    if (scope !== undefined && scope !== 'db:read') {
-      scopes.add(scope)
+/** True for `EXPLAIN ANALYZE`, which actually *executes* the analyzed statement. */
+function explainExecutes(body: Record<string, unknown>): boolean {
+  const options = body.options
+  if (!Array.isArray(options)) {
+    return false
+  }
+  return options.some((opt) => unwrap(opt)?.body.defname === 'analyze')
+}
+
+/** True for any statement that changes the effective role — `SET ROLE ...`,
+ * `SET SESSION AUTHORIZATION ...`, and their `RESET` / `DEFAULT` forms. */
+function setsRole(body: Record<string, unknown>): boolean {
+  if (body.name !== 'role' && body.name !== 'session_authorization') {
+    return false
+  }
+  return body.kind === 'VAR_SET_VALUE' || body.kind === 'VAR_SET_DEFAULT' || body.kind === 'VAR_RESET'
+}
+
+/** Add the scope(s) implied by `MERGE`, whose WHEN clauses may insert, update or delete. */
+function addMergeScopes(body: Record<string, unknown>, scopes: Set<DbScope>): void {
+  scopes.add('db:write')
+  const clauses = body.mergeWhenClauses
+  if (Array.isArray(clauses)) {
+    for (const clause of clauses) {
+      if (unwrap(clause)?.body.commandType === 'CMD_DELETE') {
+        scopes.add('db:delete')
+      }
     }
   }
 }
 
-/** True for `COPY ... FROM PROGRAM` / `COPY ... TO PROGRAM` (runs shell on the DB host). */
-function copiesViaProgram(tokens: readonly string[]): boolean {
-  for (let i = 1; i < tokens.length; i += 1) {
-    if (tokens[i] === 'PROGRAM' && (tokens[i - 1] === 'FROM' || tokens[i - 1] === 'TO')) {
-      return true
-    }
+/** The base scope of a statement, by its node type. Unknown/DDL → db:ddl (fail safe). */
+function addBaseScope(type: string, body: Record<string, unknown>, scopes: Set<DbScope>): void {
+  switch (type) {
+    case 'SelectStmt':
+      // `SELECT ... INTO new_table` is really CREATE TABLE AS — a token scan misses this.
+      scopes.add(body.intoClause === undefined ? 'db:read' : 'db:ddl')
+      return
+    case 'InsertStmt':
+    case 'UpdateStmt':
+      scopes.add('db:write')
+      return
+    case 'DeleteStmt':
+    case 'TruncateStmt':
+      scopes.add('db:delete')
+      return
+    case 'MergeStmt':
+      addMergeScopes(body, scopes)
+      return
+    case 'CopyStmt':
+      scopes.add('db:write')
+      if (body.is_program === true) {
+        scopes.add('db:ddl') // COPY ... FROM/TO PROGRAM runs a shell command on the host.
+      }
+      return
+    case 'VariableSetStmt':
+      scopes.add(setsRole(body) ? 'db:ddl' : 'db:read')
+      return
+    default:
+      scopes.add(READ_NODES.has(type) ? 'db:read' : 'db:ddl')
   }
-  return false
 }
 
-function classifyStatementInto(tokens: readonly string[], scopes: Set<DbScope>): void {
-  const first = tokens[0]
-  if (first === undefined) {
+/** Add only the *modifying* scope of a nested statement (read contributes nothing, so a
+ * SELECT feeding an INSERT doesn't add db:read; a writable CTE's DELETE does add db:delete). */
+function addNestedModifyingScope(type: string, body: Record<string, unknown>, scopes: Set<DbScope>): void {
+  switch (type) {
+    case 'InsertStmt':
+    case 'UpdateStmt':
+      scopes.add('db:write')
+      return
+    case 'DeleteStmt':
+    case 'TruncateStmt':
+      scopes.add('db:delete')
+      return
+    case 'MergeStmt':
+      addMergeScopes(body, scopes)
+      return
+    case 'CopyStmt':
+      scopes.add('db:write')
+      if (body.is_program === true) {
+        scopes.add('db:ddl')
+      }
+      return
+    case 'SelectStmt':
+      if (body.intoClause !== undefined) {
+        scopes.add('db:ddl')
+      }
+      return
+    case 'VariableSetStmt':
+    case 'ExplainStmt':
+      return // read-level / never nested in a way that adds privilege
+    default:
+      if (!READ_NODES.has(type)) {
+        scopes.add('db:ddl') // unknown/DDL nested (e.g. a CTE we don't recognise) → fail safe
+      }
+  }
+}
+
+/** Deep-walk a statement body, adding the modifying scope of every nested statement node
+ * (writable CTEs, sub-statements). Read-only subqueries contribute nothing. */
+function collectNestedModifying(value: unknown, scopes: Set<DbScope>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectNestedModifying(item, scopes)
+    }
     return
   }
+  if (!isRecord(value)) {
+    return
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (isStmtNodeType(key) && isRecord(child)) {
+      addNestedModifyingScope(key, child, scopes)
+    }
+    collectNestedModifying(child, scopes)
+  }
+}
 
-  // A WITH (CTE) query can wrap a data-modifying statement, so scan the whole
-  // statement and add every non-read scope its keywords imply.
-  if (first === 'WITH') {
+/** Classify one top-level (or EXPLAIN-inner) statement into the scopes it requires. */
+function classifyStatement(node: unknown, scopes: Set<DbScope>): void {
+  const unwrapped = unwrap(node)
+  if (unwrapped === null) {
+    return
+  }
+  const { type, body } = unwrapped
+
+  // EXPLAIN only plans (read); EXPLAIN ANALYZE executes the analyzed statement, so it
+  // needs that statement's scopes. Handle it explicitly so we never recurse into a
+  // non-executing plan.
+  if (type === 'ExplainStmt') {
     scopes.add('db:read')
-    addModifyingScopes(tokens, scopes)
+    if (explainExecutes(body)) {
+      classifyStatement(body.query, scopes)
+    }
     return
   }
 
-  // EXPLAIN ANALYZE *executes* the analyzed statement (including its writes /
-  // deletes / CREATE TABLE AS), so it needs the inner operation's scopes. Plain
-  // EXPLAIN only plans, so it stays db:read.
-  if (first === 'EXPLAIN') {
+  addBaseScope(type, body, scopes)
+  // A CTE-bearing statement reads its CTE results, so it needs at least read (this also
+  // makes `WITH x AS (DELETE ...) INSERT ...` require read+write+delete together).
+  if (body.withClause !== undefined && body.withClause !== null) {
     scopes.add('db:read')
-    if (tokens.includes('ANALYZE')) {
-      addModifyingScopes(tokens, scopes, EXPLAIN_OPTION_TOKENS)
-    }
-    return
   }
-
-  // SET ROLE / SET SESSION AUTHORIZATION can switch the effective DB role, so
-  // they require the most privileged scope; other SETs are read-level.
-  if (first === 'SET') {
-    if (tokens[1] === 'ROLE' || (tokens[1] === 'SESSION' && tokens[2] === 'AUTHORIZATION')) {
-      scopes.add('db:ddl')
-    } else {
-      scopes.add('db:read')
-    }
-    return
-  }
-
-  // COPY ... FROM/TO PROGRAM executes shell commands on the database host.
-  if (first === 'COPY') {
-    scopes.add('db:write')
-    if (copiesViaProgram(tokens)) {
-      scopes.add('db:ddl')
-    }
-    return
-  }
-
-  const firstScope = KEYWORD_SCOPE[first]
-  if (firstScope !== undefined) {
-    scopes.add(firstScope)
-  } else {
-    // Unknown leading keyword — fail safe to the most privileged scope so an
-    // unrecognised command can never slip through under a weaker grant.
-    scopes.add('db:ddl')
-  }
+  collectNestedModifying(body, scopes)
 }
+
+/** First SQL keyword of the input (after leading whitespace/comments), upper-cased. */
+function firstKeyword(raw: string): string | null {
+  const stripped = raw.replace(/^(?:\s+|--[^\n]*\n?|\/\*[\s\S]*?\*\/)+/, '')
+  const match = /^[A-Za-z]+/.exec(stripped)
+  return match === null ? null : match[0].toUpperCase()
+}
+
+const EMPTY: SqlClassification = { empty: true, firstKeyword: null, statementCount: 0, requiredScopes: [] }
 
 /**
- * Classify a SQL string (one or many `;`-separated statements) into the scope(s)
- * it requires. Every statement is inspected and the results unioned, so a batch
- * like `SELECT 1; DROP TABLE x` correctly requires both `db:read` and `db:ddl`
- * and cannot be smuggled past a read-only grant.
+ * Classify a SQL string (one or many `;`-separated statements) into the scope(s) it
+ * requires. Every statement is inspected and the results unioned, so a batch like
+ * `SELECT 1; DROP TABLE x` correctly requires both `db:read` and `db:ddl` and cannot be
+ * smuggled past a read-only grant.
  */
-export function classifySql(raw: string): SqlClassification {
-  const cleaned = stripSqlNoise(raw)
-  const statements = cleaned
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
+export async function classifySql(raw: string): Promise<SqlClassification> {
+  let tree: ParseTree
+  try {
+    tree = (await parse(raw)) as unknown as ParseTree
+  } catch {
+    // Empty / whitespace-only input parses as "empty"; anything else is a syntax error,
+    // which we fail safe to the most privileged scope (the engine is the real boundary).
+    if (raw.trim() === '') {
+      return EMPTY
+    }
+    return { empty: false, firstKeyword: firstKeyword(raw), statementCount: 1, requiredScopes: ['db:ddl'] }
+  }
 
+  const statements = (tree.stmts ?? []).filter((s): s is { stmt: unknown } => s.stmt !== undefined)
   if (statements.length === 0) {
-    return { empty: true, firstKeyword: null, statementCount: 0, requiredScopes: [] }
+    return EMPTY
   }
 
   const scopes = new Set<DbScope>()
-  let firstKeyword: string | null = null
-
-  for (const statement of statements) {
-    const tokens = statement.toUpperCase().match(/[A-Z]+/g) ?? []
-    if (tokens.length === 0) {
-      continue
-    }
-    firstKeyword ??= tokens[0] ?? null
-    classifyStatementInto(tokens, scopes)
+  for (const { stmt } of statements) {
+    classifyStatement(stmt, scopes)
   }
-
   if (scopes.size === 0) {
     scopes.add('db:ddl')
   }
 
   return {
     empty: false,
-    firstKeyword,
+    firstKeyword: firstKeyword(raw),
     statementCount: statements.length,
     requiredScopes: [...scopes],
   }
