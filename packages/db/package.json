@@ -10,6 +10,7 @@
   "scripts": {
     "generate": "drizzle-kit generate",
     "push": "drizzle-kit push",
+    "reset": "bun --env-file=../../.env src/reset.ts",
     "migrate": "bun --env-file=../../.env src/migrate.ts",
     "typecheck": "tsgo --noEmit"
   },
