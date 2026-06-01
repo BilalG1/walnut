@@ -20,6 +20,9 @@ coverage/
 .DS_Store
 *.swp
 
+# Local working notes (not checked in)
+notes/
+
 # InsForge & AI agent skills
 .insforge
 .agent
