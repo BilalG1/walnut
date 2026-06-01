@@ -1,0 +1,107 @@
+import { parseArgs } from './args.ts'
+import { type ApiClient, makeClient } from './client.ts'
+import { dbQuery, scopeLs, scopeRequest, whoami } from './commands.ts'
+import { resolveConfig } from './config.ts'
+import { EXIT } from './exit.ts'
+import { dbHelp, scopeHelp, topLevelHelp } from './help.ts'
+import { fail, type CliResult } from './output.ts'
+import { VERSION } from './version.ts'
+
+/** Injected so the dispatcher stays testable without touching the real process. */
+export interface CliIO {
+  env: Record<string, string | undefined>
+  readStdin: () => Promise<string>
+}
+
+function help(text: string): CliResult {
+  return { stdout: text, stderr: '', code: EXIT.OK }
+}
+
+/** Build a client from resolved config, or short-circuit with the config failure. */
+async function withClient(
+  options: Record<string, string | boolean>,
+  env: Record<string, string | undefined>,
+  pretty: boolean,
+  fn: (client: ApiClient) => Promise<CliResult>,
+): Promise<CliResult> {
+  const config = resolveConfig(options, env, pretty)
+  if ('code' in config) {
+    return config
+  }
+  return fn(makeClient(config.apiUrl, config.apiKey))
+}
+
+/**
+ * Parse argv and run the matching command. Returns a `CliResult` rather than exiting,
+ * so it can be unit-tested directly; `index.ts` is the only place that touches
+ * stdin/stdout/exit.
+ */
+export async function run(argv: readonly string[], io: CliIO): Promise<CliResult> {
+  const parsed = parseArgs(argv)
+  const pretty = parsed.options.pretty === true
+
+  if (parsed.error !== undefined) {
+    return fail(EXIT.USAGE, 'usage', parsed.error, pretty, { hint: 'Run `walnut --help`.' })
+  }
+  if (parsed.options.version === true) {
+    return { stdout: VERSION, stderr: '', code: EXIT.OK }
+  }
+
+  const [command, sub, ...rest] = parsed.positionals
+  const wantsHelp = parsed.options.help === true
+
+  if (command === undefined) {
+    return help(topLevelHelp())
+  }
+
+  switch (command) {
+    case 'whoami':
+      if (wantsHelp) return help(topLevelHelp())
+      return withClient(parsed.options, io.env, pretty, (client) => whoami(client, pretty))
+
+    case 'db': {
+      if (wantsHelp) return help(dbHelp())
+      if (sub === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'db needs a subcommand. Try: walnut db query "<sql>".', pretty)
+      }
+      if (sub !== 'query') {
+        return fail(EXIT.USAGE, 'usage', `Unknown db subcommand: ${sub}. Only "query" is supported.`, pretty)
+      }
+      const sqlArg = rest[0]
+      if (sqlArg === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'db query needs SQL: a string argument, or "-" to read stdin.', pretty)
+      }
+      let sql = sqlArg
+      if (sqlArg === '-') {
+        sql = (await io.readStdin()).trim()
+        if (sql === '') {
+          return fail(EXIT.USAGE, 'usage', 'db query - was given empty stdin.', pretty)
+        }
+      }
+      return withClient(parsed.options, io.env, pretty, (client) => dbQuery(client, sql, pretty))
+    }
+
+    case 'scope': {
+      if (wantsHelp) return help(scopeHelp())
+      if (sub === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'scope needs a subcommand: "ls" or "request".', pretty)
+      }
+      if (sub === 'ls') {
+        return withClient(parsed.options, io.env, pretty, (client) => scopeLs(client, pretty))
+      }
+      if (sub === 'request') {
+        if (rest.length === 0) {
+          return fail(EXIT.USAGE, 'usage', 'scope request needs at least one scope (e.g. db:read db:write).', pretty)
+        }
+        const reason = typeof parsed.options.reason === 'string' ? parsed.options.reason : undefined
+        return withClient(parsed.options, io.env, pretty, (client) => scopeRequest(client, rest, reason, pretty))
+      }
+      return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)
+    }
+
+    default:
+      return fail(EXIT.USAGE, 'unknown_command', `Unknown command: ${command}.`, pretty, {
+        hint: 'Run `walnut --help` to see commands.',
+      })
+  }
+}

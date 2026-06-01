@@ -27,6 +27,22 @@
         "postgres": "3.4.9",
       },
     },
+    "apps/cli": {
+      "name": "@walnut/cli",
+      "version": "0.1.0",
+      "bin": {
+        "walnut": "./src/index.ts",
+      },
+      "dependencies": {
+        "@elysiajs/eden": "1.4.9",
+        "@walnut/api": "workspace:*",
+        "@walnut/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@walnut/db": "workspace:*",
+        "postgres": "3.4.9",
+      },
+    },
     "apps/web": {
       "name": "@walnut/web",
       "version": "0.1.0",
@@ -312,6 +328,8 @@
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.0" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg=="],
 
     "@walnut/api": ["@walnut/api@workspace:apps/api"],
+
+    "@walnut/cli": ["@walnut/cli@workspace:apps/cli"],
 
     "@walnut/core": ["@walnut/core@workspace:packages/core"],
 
