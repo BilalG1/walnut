@@ -3,16 +3,20 @@ export {
   users,
   projects,
   agents,
+  agentGrants,
   scopeRequests,
 } from './schema.ts'
 export type {
   ProjectStatus,
   ScopeRequestStatus,
+  GrantResourceType,
   User,
   Project,
   NewProject,
   Agent,
   NewAgent,
+  AgentGrant,
+  NewAgentGrant,
   ScopeRequest,
   NewScopeRequest,
 } from './schema.ts'

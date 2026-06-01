@@ -1,4 +1,5 @@
-import type { Agent, Project, ScopeRequest } from '@walnut/db'
+import { parseScopes } from '@walnut/core'
+import type { Agent, AgentGrant, Project, ScopeRequest } from '@walnut/db'
 
 export interface ProjectSummary {
   id: string
@@ -54,14 +55,19 @@ export function toProjectDetail(p: Project): ProjectDetail {
   return { ...toProjectSummary(p), connectionUri: p.connectionUri }
 }
 
-export function toAgentView(a: Agent): AgentView {
+/** An agent's effective scopes: the deduplicated union across all its grants. */
+export function effectiveScopes(grants: readonly AgentGrant[]): string[] {
+  return parseScopes(grants.flatMap((g) => g.scopes))
+}
+
+export function toAgentView(agent: Agent, grants: readonly AgentGrant[]): AgentView {
   return {
-    id: a.id,
-    projectId: a.projectId,
-    name: a.name,
-    keyPrefix: a.keyPrefix,
-    scopes: a.scopes,
-    createdAt: a.createdAt.toISOString(),
+    id: agent.id,
+    projectId: agent.projectId,
+    name: agent.name,
+    keyPrefix: agent.keyPrefix,
+    scopes: effectiveScopes(grants),
+    createdAt: agent.createdAt.toISOString(),
   }
 }
 

@@ -8,19 +8,46 @@ import {
   parseScopes,
   syncAgentScopes,
 } from '@walnut/core'
-import { agents, type Agent } from '@walnut/db'
-import { desc, eq } from 'drizzle-orm'
+import { agentGrants, agents, type Agent, type AgentGrant, type GrantResourceType } from '@walnut/db'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
 import { getProject, getProjectInternal } from './projects.ts'
 
-export async function listAgents(ctx: AppContext, projectId: string): Promise<Agent[]> {
-  await getProject(ctx, projectId)
-  return ctx.db.select().from(agents).where(eq(agents.projectId, projectId)).orderBy(desc(agents.createdAt))
+/** An agent plus its grants — the unit the dashboard and serializers care about. */
+export interface AgentWithGrants {
+  agent: Agent
+  grants: AgentGrant[]
 }
 
-export interface CreatedAgent {
-  agent: Agent
+/** Load the grants for many agents at once, grouped by agent id (empty array if none). */
+async function grantsByAgent(ctx: AppContext, agentIds: string[]): Promise<Map<string, AgentGrant[]>> {
+  const byAgent = new Map<string, AgentGrant[]>(agentIds.map((id) => [id, []]))
+  if (agentIds.length === 0) {
+    return byAgent
+  }
+  const rows = await ctx.db.select().from(agentGrants).where(inArray(agentGrants.agentId, agentIds))
+  for (const grant of rows) {
+    byAgent.get(grant.agentId)?.push(grant)
+  }
+  return byAgent
+}
+
+export async function listAgents(ctx: AppContext, projectId: string): Promise<AgentWithGrants[]> {
+  await getProject(ctx, projectId)
+  const rows = await ctx.db
+    .select()
+    .from(agents)
+    .where(eq(agents.projectId, projectId))
+    .orderBy(desc(agents.createdAt))
+  const grants = await grantsByAgent(
+    ctx,
+    rows.map((a) => a.id),
+  )
+  return rows.map((agent) => ({ agent, grants: grants.get(agent.id) ?? [] }))
+}
+
+export interface CreatedAgent extends AgentWithGrants {
   /** Plaintext API key — returned only once, never persisted. */
   apiKey: string
 }
@@ -43,30 +70,38 @@ export async function createAgent(
   const { role, connectionUri } = await createAgentRole(project.connectionUri)
 
   const apiKey = newAgentKey()
-  let created: Agent | undefined
+  let result: AgentWithGrants
   try {
-    ;[created] = await ctx.db
-      .insert(agents)
-      .values({
-        projectId,
-        name: input.name,
-        keyHash: hashKey(apiKey),
-        keyPrefix: keyPrefix(apiKey),
-        scopes: [],
-        dbRole: role,
-        connectionUri,
-      })
-      .returning()
+    result = await ctx.db.transaction(async (tx) => {
+      const [agent] = await tx
+        .insert(agents)
+        .values({
+          projectId,
+          name: input.name,
+          keyHash: hashKey(apiKey),
+          keyPrefix: keyPrefix(apiKey),
+        })
+        .returning()
+      if (agent === undefined) {
+        throw new Error('Failed to insert agent row.')
+      }
+      const [grant] = await tx
+        .insert(agentGrants)
+        .values({ agentId: agent.id, resourceType: 'project', resourceId: projectId, scopes: [], dbRole: role, connectionUri })
+        .returning()
+      if (grant === undefined) {
+        throw new Error('Failed to insert agent grant row.')
+      }
+      return { agent, grants: [grant] }
+    })
   } catch (err) {
-    // Roll back the just-created role on any insert failure (throw or empty result).
+    // Roll back the just-created role on any failure so we don't leak it.
     await rollbackAgentRole(project.connectionUri, role)
-    throw err
+    throw err instanceof HttpError
+      ? err
+      : new HttpError(500, { error: 'internal_error', message: 'Failed to create agent.' })
   }
-  if (created === undefined) {
-    await rollbackAgentRole(project.connectionUri, role)
-    throw new HttpError(500, { error: 'internal_error', message: 'Failed to create agent.' })
-  }
-  return { agent: created, apiKey }
+  return { ...result, apiKey }
 }
 
 /** Best-effort drop of an agent role during error recovery; logs but never throws. */
@@ -76,28 +111,36 @@ async function rollbackAgentRole(ownerUri: string, role: string): Promise<void> 
   })
 }
 
-export async function getAgent(ctx: AppContext, id: string): Promise<Agent> {
+export async function getAgent(ctx: AppContext, id: string): Promise<AgentWithGrants> {
   const [row] = await ctx.db.select().from(agents).where(eq(agents.id, id)).limit(1)
   if (row === undefined) {
     throw notFound('Agent')
   }
   // Confirm the agent's project belongs to the caller.
   await getProject(ctx, row.projectId)
-  return row
+  const grants = await ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, id))
+  return { agent: row, grants }
 }
 
 export async function deleteAgent(ctx: AppContext, id: string): Promise<void> {
-  const agent = await getAgent(ctx, id)
-  if (agent.dbRole !== null) {
-    const project = await getProjectInternal(ctx, agent.projectId)
+  const { agent, grants } = await getAgent(ctx, id)
+  for (const grant of grants) {
+    if (grant.dbRole === null) {
+      continue
+    }
+    // Each grant's role lives in its resource's database (a project, for now).
+    // eslint-disable-next-line no-await-in-loop
+    const project = await getProjectInternal(ctx, grant.resourceId)
     if (project.connectionUri !== null) {
       // Best-effort: still remove the metadata row even if the role teardown fails,
       // matching deleteProject's philosophy (don't strand the user's delete).
-      await dropAgentRole(project.connectionUri, agent.dbRole).catch((e) => {
+      // eslint-disable-next-line no-await-in-loop
+      await dropAgentRole(project.connectionUri, grant.dbRole).catch((e) => {
         console.error(`Failed to drop Postgres role for agent ${agent.id}:`, e)
       })
     }
   }
+  // Cascade removes the agent's grant rows.
   await ctx.db.delete(agents).where(eq(agents.id, agent.id))
 }
 
@@ -106,16 +149,58 @@ export async function findAgentByKey(ctx: AppContext, key: string): Promise<Agen
   return row
 }
 
-/** Merge new scopes into an agent's grant, validated and deduplicated. Also
- * reconciles the agent's Postgres role memberships so the database engine enforces
- * the new grant. */
-export async function grantScopes(ctx: AppContext, agent: Agent, add: readonly AgentScope[]): Promise<Agent> {
-  const merged = parseScopes([...agent.scopes, ...add])
-  const [updated] = await ctx.db.update(agents).set({ scopes: merged }).where(eq(agents.id, agent.id)).returning()
-  const result = updated ?? agent
+/** The agent's grant for a given resource (its access there), if any. */
+export async function getAgentGrant(
+  ctx: AppContext,
+  agentId: string,
+  resourceType: GrantResourceType,
+  resourceId: string,
+): Promise<AgentGrant | undefined> {
+  const [row] = await ctx.db
+    .select()
+    .from(agentGrants)
+    .where(
+      and(
+        eq(agentGrants.agentId, agentId),
+        eq(agentGrants.resourceType, resourceType),
+        eq(agentGrants.resourceId, resourceId),
+      ),
+    )
+    .limit(1)
+  return row
+}
+
+/**
+ * Merge new scopes into an agent's grant for a resource, validated and deduplicated.
+ * Also reconciles the agent's Postgres role memberships so the database engine
+ * enforces the new grant.
+ */
+export async function grantScopes(
+  ctx: AppContext,
+  agentId: string,
+  resourceType: GrantResourceType,
+  resourceId: string,
+  add: readonly AgentScope[],
+): Promise<AgentGrant> {
+  const existing = await getAgentGrant(ctx, agentId, resourceType, resourceId)
+  if (existing === undefined) {
+    // For the MVP a grant is created with the agent, so this is an invariant break.
+    throw new HttpError(500, {
+      error: 'internal_error',
+      message: 'Agent has no grant for this resource.',
+    })
+  }
+
+  const merged = parseScopes([...existing.scopes, ...add])
+  const [updated] = await ctx.db
+    .update(agentGrants)
+    .set({ scopes: merged })
+    .where(eq(agentGrants.id, existing.id))
+    .returning()
+  const result = updated ?? existing
 
   if (result.dbRole !== null) {
-    const project = await getProjectInternal(ctx, result.projectId)
+    const project = await getProjectInternal(ctx, resourceId)
     if (project.connectionUri !== null) {
       await syncAgentScopes(project.connectionUri, result.dbRole, merged)
     }

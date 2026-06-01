@@ -24,13 +24,13 @@ export function projectRoutes(ctx: AppContext) {
     })
     .get('/:id/agents', async ({ params }) => {
       const rows = await listAgents(ctx, params.id)
-      return rows.map(toAgentView)
+      return rows.map(({ agent, grants }) => toAgentView(agent, grants))
     })
     .post(
       '/:id/agents',
       async ({ params, body }) => {
-        const { agent, apiKey } = await createAgent(ctx, params.id, body)
-        return { ...toAgentView(agent), apiKey }
+        const { agent, grants, apiKey } = await createAgent(ctx, params.id, body)
+        return { ...toAgentView(agent, grants), apiKey }
       },
       { body: t.Object({ name: nameSchema }) },
     )

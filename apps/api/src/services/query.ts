@@ -1,5 +1,5 @@
 import { classifySql, missingScopes, type QueryResult, runSql, SCOPE_DESCRIPTIONS } from '@walnut/core'
-import type { Agent, Project } from '@walnut/db'
+import type { AgentGrant, Project } from '@walnut/db'
 import { HttpError } from '../errors.ts'
 
 export interface AgentQueryResult extends QueryResult {
@@ -7,11 +7,12 @@ export interface AgentQueryResult extends QueryResult {
 }
 
 /**
- * Execute an agent's SQL against its project database, enforcing scopes first.
- * A missing scope yields a clear, machine-readable 403 telling the agent exactly
- * what it lacks and how to ask for it — the heart of the agent-first contract.
+ * Execute an agent's SQL against a project database, enforcing the grant's scopes
+ * first. A missing scope yields a clear, machine-readable 403 telling the agent
+ * exactly what it lacks and how to ask for it — the heart of the agent-first
+ * contract.
  */
-export async function runAgentQuery(project: Project, agent: Agent, sql: string): Promise<AgentQueryResult> {
+export async function runAgentQuery(project: Project, grant: AgentGrant, sql: string): Promise<AgentQueryResult> {
   if (project.status !== 'active' || project.connectionUri === null) {
     throw new HttpError(409, {
       error: 'project_not_ready',
@@ -24,7 +25,7 @@ export async function runAgentQuery(project: Project, agent: Agent, sql: string)
     throw new HttpError(400, { error: 'empty_query', message: 'SQL statement is empty.' })
   }
 
-  const missing = missingScopes(agent.scopes, classification.requiredScopes)
+  const missing = missingScopes(grant.scopes, classification.requiredScopes)
   if (missing.length > 0) {
     throw new HttpError(403, {
       error: 'insufficient_scope',
@@ -34,16 +35,16 @@ export async function runAgentQuery(project: Project, agent: Agent, sql: string)
         '(POST /agent/v1/scope-requests).',
       requiredScopes: classification.requiredScopes,
       missingScopes: missing,
-      grantedScopes: agent.scopes,
+      grantedScopes: grant.scopes,
       scopeDetails: missing.map((s) => ({ scope: s, description: SCOPE_DESCRIPTIONS[s] })),
       howToRequest: 'POST /agent/v1/scope-requests with body { "scopes": [...], "reason": "..." }',
     })
   }
 
-  // Run over the agent's own restricted role when it has one (defense in depth:
-  // the database engine backs up the classifier). Fall back to the owner
-  // connection only for pre-roles agents created before this existed.
-  const connectionUri = agent.connectionUri ?? project.connectionUri
+  // Run over the grant's own restricted role (defense in depth: the database engine
+  // backs up the classifier). Fall back to the owner connection only if the grant
+  // somehow has no scoped connection.
+  const connectionUri = grant.connectionUri ?? project.connectionUri
 
   let result: QueryResult
   try {

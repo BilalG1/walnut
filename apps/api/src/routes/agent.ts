@@ -3,7 +3,7 @@ import { Elysia, t } from 'elysia'
 import type { AppContext } from '../context.ts'
 import { badRequest, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
-import { findAgentByKey } from '../services/agents.ts'
+import { findAgentByKey, getAgentGrant } from '../services/agents.ts'
 import { getProjectInternal } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
@@ -29,17 +29,22 @@ export function agentApiRoutes(ctx: AppContext) {
         throw unauthorized('Invalid agent API key.')
       }
       const project = await getProjectInternal(ctx, agent.projectId)
-      return { agent, project }
+      // The agent's access to its home project. Every agent has this grant from birth.
+      const grant = await getAgentGrant(ctx, agent.id, 'project', agent.projectId)
+      if (grant === undefined) {
+        throw unauthorized('Agent has no grant; recreate it.')
+      }
+      return { agent, project, grant }
     })
-    .get('/identity', ({ agent, project }) => ({
+    .get('/identity', ({ agent, project, grant }) => ({
       id: agent.id,
       name: agent.name,
-      scopes: agent.scopes,
+      scopes: grant.scopes,
       project: { id: project.id, name: project.name, status: project.status },
     }))
     .post(
       '/query',
-      async ({ agent, project, body }) => runAgentQuery(project, agent, body.sql),
+      async ({ project, grant, body }) => runAgentQuery(project, grant, body.sql),
       { body: t.Object({ sql: t.String({ minLength: 1 }) }) },
     )
     .post(

@@ -1,5 +1,5 @@
 import { type AgentScope, SYSTEM_USER_ID } from '@walnut/core'
-import { agents, projects, scopeRequests, type Agent, type ScopeRequest, type ScopeRequestStatus } from '@walnut/db'
+import { projects, scopeRequests, type Agent, type ScopeRequest, type ScopeRequestStatus } from '@walnut/db'
 import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
@@ -69,7 +69,6 @@ async function getOwnedScopeRequest(ctx: AppContext, id: string): Promise<ScopeR
 
 export interface ResolvedScopeRequest {
   request: ScopeRequest
-  agent?: Agent
 }
 
 export async function resolveScopeRequest(
@@ -85,12 +84,10 @@ export async function resolveScopeRequest(
     })
   }
 
-  let updatedAgent: Agent | undefined
   if (decision === 'approved') {
-    const [agentRow] = await ctx.db.select().from(agents).where(eq(agents.id, request.agentId)).limit(1)
-    if (agentRow !== undefined) {
-      updatedAgent = await grantScopes(ctx, agentRow, request.scopes)
-    }
+    // Merge the requested scopes into the agent's grant for the anchored resource
+    // (a project, today) and sync its Postgres role memberships.
+    await grantScopes(ctx, request.agentId, 'project', request.projectId, request.scopes)
   }
 
   const [updated] = await ctx.db
@@ -99,5 +96,5 @@ export async function resolveScopeRequest(
     .where(eq(scopeRequests.id, id))
     .returning()
 
-  return { request: updated ?? request, agent: updatedAgent }
+  return { request: updated ?? request }
 }

@@ -60,6 +60,12 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
     `apps/web/bunfig.toml`).
 - **No auth yet:** owner is hard-coded `SYSTEM_USER_ID` (`00000000-…`). Keep all data
   scoped by `userId` so real auth slots in later.
+- **Nothing is shipped — break things freely.** No users and no production data, so
+  migrations, backwards compatibility, and deprecation shims are wasted effort. Reshape
+  schemas, rename things, and change contracts directly; regenerate migrations from the
+  current schema rather than preserving history. Just keep `bun run check` green.
+- **Commit to `main` locally by default.** Make small local commits straight on `main`;
+  don't open PRs or create feature branches unless I explicitly ask for one.
 
 ## The agent model (the point of the project)
 

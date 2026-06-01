@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
+import { agentGrants } from '@walnut/db'
+import { eq } from 'drizzle-orm'
 import { createHarness, type Harness } from './harness.ts'
 
 interface ErrorBody {
@@ -131,6 +133,28 @@ describe('agents', () => {
     expect(del.data).toEqual({ deleted: true })
     const after = await h.api.api.agents({ id: agent.id }).get()
     expect(after.status).toBe(404)
+  })
+
+  // Grants are the normalized source of truth for an agent's scopes + scoped role.
+  test('creating an agent provisions exactly one project-anchored grant', async () => {
+    const project = await newProject()
+    const agent = await newAgent(project.id)
+    const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
+    expect(grants.length).toBe(1)
+    const g = grants[0]
+    expect(g?.resourceType).toBe('project')
+    expect(g?.resourceId).toBe(project.id)
+    expect(g?.scopes).toEqual([])
+    expect(typeof g?.dbRole).toBe('string')
+    expect(g?.connectionUri ?? '').toContain('postgres')
+  })
+
+  test('approving a scope request writes the scopes onto the grant', async () => {
+    const project = await newProject()
+    const agent = await newAgent(project.id)
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
+    const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
+    expect(grants[0]?.scopes).toEqual(['db:read', 'db:write'])
   })
 })
 
