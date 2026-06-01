@@ -8,6 +8,9 @@ export interface ProviderConfig {
   kind: ProviderKind
   /** Admin connection string for the local provider. */
   localAdminUrl?: string
+  /** Per-project database-name prefix for the local provider (default `proj`). Lets
+   * parallel test suites isolate their per-project databases. */
+  localDbPrefix?: string
   /** API key for the Neon provider. */
   neonApiKey?: string
 }
@@ -22,5 +25,5 @@ export function createProvider(config: ProviderConfig): DatabaseProvider {
   if (config.localAdminUrl === undefined || config.localAdminUrl === '') {
     throw new Error('DB_PROVIDER=local requires LOCAL_PG_ADMIN_URL to be set')
   }
-  return createLocalProvider(config.localAdminUrl)
+  return createLocalProvider(config.localAdminUrl, config.localDbPrefix)
 }

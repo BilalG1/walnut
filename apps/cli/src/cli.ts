@@ -7,10 +7,13 @@ import { dbHelp, scopeHelp, topLevelHelp } from './help.ts'
 import { fail, type CliResult } from './output.ts'
 import { VERSION } from './version.ts'
 
-/** Injected so the dispatcher stays testable without touching the real process. */
+/** Injected so the dispatcher stays testable without touching the real process or
+ * network. Tests pass an in-memory `makeClient` (the sandbox firewall intercepts real
+ * fetch, and it also lets a command run against a real app without a socket). */
 export interface CliIO {
   env: Record<string, string | undefined>
   readStdin: () => Promise<string>
+  makeClient?: (apiUrl: string, apiKey: string) => ApiClient
 }
 
 function help(text: string): CliResult {
@@ -19,16 +22,17 @@ function help(text: string): CliResult {
 
 /** Build a client from resolved config, or short-circuit with the config failure. */
 async function withClient(
+  io: CliIO,
   options: Record<string, string | boolean>,
-  env: Record<string, string | undefined>,
   pretty: boolean,
   fn: (client: ApiClient) => Promise<CliResult>,
 ): Promise<CliResult> {
-  const config = resolveConfig(options, env, pretty)
+  const config = resolveConfig(options, io.env, pretty)
   if ('code' in config) {
     return config
   }
-  return fn(makeClient(config.apiUrl, config.apiKey))
+  const make = io.makeClient ?? makeClient
+  return fn(make(config.apiUrl, config.apiKey))
 }
 
 /**
@@ -57,7 +61,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
   switch (command) {
     case 'whoami':
       if (wantsHelp) return help(topLevelHelp())
-      return withClient(parsed.options, io.env, pretty, (client) => whoami(client, pretty))
+      return withClient(io, parsed.options, pretty, (client) => whoami(client, pretty))
 
     case 'db': {
       if (wantsHelp) return help(dbHelp())
@@ -78,7 +82,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
           return fail(EXIT.USAGE, 'usage', 'db query - was given empty stdin.', pretty)
         }
       }
-      return withClient(parsed.options, io.env, pretty, (client) => dbQuery(client, sql, pretty))
+      return withClient(io, parsed.options, pretty, (client) => dbQuery(client, sql, pretty))
     }
 
     case 'scope': {
@@ -87,14 +91,14 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
         return fail(EXIT.USAGE, 'usage', 'scope needs a subcommand: "ls" or "request".', pretty)
       }
       if (sub === 'ls') {
-        return withClient(parsed.options, io.env, pretty, (client) => scopeLs(client, pretty))
+        return withClient(io, parsed.options, pretty, (client) => scopeLs(client, pretty))
       }
       if (sub === 'request') {
         if (rest.length === 0) {
           return fail(EXIT.USAGE, 'usage', 'scope request needs at least one scope (e.g. db:read db:write).', pretty)
         }
         const reason = typeof parsed.options.reason === 'string' ? parsed.options.reason : undefined
-        return withClient(parsed.options, io.env, pretty, (client) => scopeRequest(client, rest, reason, pretty))
+        return withClient(io, parsed.options, pretty, (client) => scopeRequest(client, rest, reason, pretty))
       }
       return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)
     }

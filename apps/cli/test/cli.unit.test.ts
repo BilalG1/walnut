@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { parseArgs } from '../src/args.ts'
 import { run, type CliIO } from '../src/cli.ts'
+import { networkError, respond } from '../src/client.ts'
 import { EXIT, httpStatusToExit } from '../src/exit.ts'
 import { formatJson } from '../src/output.ts'
 
@@ -123,6 +124,37 @@ describe('run — usage errors (no network)', () => {
     const r = await run(['db', 'query', '-'], io())
     expect(r.code).toBe(EXIT.USAGE)
     expect(parseErr(r.stderr).message).toContain('empty stdin')
+  })
+})
+
+describe('respond / networkError (transport mapping)', () => {
+  test('success → JSON on stdout, exit 0', () => {
+    const r = respond({ data: { ok: 1 }, error: null, status: 200 }, false)
+    expect(r.code).toBe(EXIT.OK)
+    expect(r.stdout).toBe('{"ok":1}')
+    expect(r.stderr).toBe('')
+  })
+
+  test('API error body passes through to stderr verbatim, mapped to an exit code', () => {
+    const body = { error: 'insufficient_scope', message: 'm', missingScopes: ['db:read'] }
+    const r = respond({ data: null, error: { status: 403, value: body }, status: 403 }, false)
+    expect(r.code).toBe(EXIT.SCOPE)
+    expect(JSON.parse(r.stderr)).toEqual(body)
+    expect(r.stdout).toBe('')
+  })
+
+  test('no status (never reached the server) → network, exit 7', () => {
+    const r = respond({ data: null, error: null }, false)
+    expect(r.code).toBe(EXIT.NETWORK)
+    expect(JSON.parse(r.stderr).error).toBe('network')
+  })
+
+  test('networkError → exit 7 with the thrown message', () => {
+    const r = networkError(new Error('connect ECONNREFUSED'), false)
+    expect(r.code).toBe(EXIT.NETWORK)
+    const body = JSON.parse(r.stderr)
+    expect(body.error).toBe('network')
+    expect(body.message).toContain('ECONNREFUSED')
   })
 })
 

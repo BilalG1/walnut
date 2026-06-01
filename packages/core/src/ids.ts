@@ -21,7 +21,9 @@ export function keyPrefix(key: string): string {
   return key.slice(0, 12)
 }
 
-/** A short, DNS/identifier-safe database name for a provisioned project. */
-export function newDatabaseName(): string {
-  return `proj_${randomBytes(8).toString('hex')}`
+/** A short, DNS/identifier-safe database name for a provisioned project. The prefix
+ * defaults to `proj`; callers can vary it so parallel test suites don't share a
+ * per-project database namespace. */
+export function newDatabaseName(prefix = 'proj'): string {
+  return `${prefix}_${randomBytes(8).toString('hex')}`
 }

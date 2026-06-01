@@ -32,7 +32,10 @@ export async function scopeLs(client: ApiClient, pretty: boolean): Promise<CliRe
     if (statusOf(requests) < 200 || statusOf(requests) >= 300) {
       return respond(requests, pretty)
     }
-    return ok({ granted: identity.data?.scopes ?? [], requests: requests.data ?? [] }, pretty)
+    // Treaty's response-body types collapse across the package boundary, so read the
+    // one field we need with a narrow cast (the runtime shape is the identity body).
+    const granted = (identity.data as { scopes?: string[] } | null)?.scopes ?? []
+    return ok({ granted, requests: requests.data ?? [] }, pretty)
   } catch (err) {
     return networkError(err, pretty)
   }

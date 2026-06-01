@@ -3,13 +3,6 @@ import { newDatabaseName } from '../ids.ts'
 import { dropProjectRoles } from '../roles.ts'
 import type { DatabaseProvider } from './types.ts'
 
-/** Guard against interpolating anything but our own generated db names. */
-function assertSafeDbName(name: string): void {
-  if (!/^proj_[a-f0-9]+$/.test(name)) {
-    throw new Error(`Refusing to operate on unexpected database name: ${name}`)
-  }
-}
-
 function withDatabase(adminUrl: string, dbName: string): string {
   const url = new URL(adminUrl)
   url.pathname = `/${dbName}`
@@ -20,12 +13,27 @@ function withDatabase(adminUrl: string, dbName: string): string {
  * A provider backed by the local docker Postgres. Each "project" becomes its own
  * database on that instance, which makes the whole provision → query → destroy
  * lifecycle fully exercisable in tests without touching Neon.
+ *
+ * `dbPrefix` (default `proj`) namespaces the per-project databases this provider
+ * creates and operates on; parallel test suites pass distinct prefixes so they never
+ * touch each other's databases.
  */
-export function createLocalProvider(adminUrl: string): DatabaseProvider {
+export function createLocalProvider(adminUrl: string, dbPrefix = 'proj'): DatabaseProvider {
+  if (!/^[a-z]+$/.test(dbPrefix)) {
+    throw new Error(`Invalid local db prefix (expected [a-z]+): ${dbPrefix}`)
+  }
+  const safeDbName = new RegExp(`^${dbPrefix}_[a-f0-9]+$`)
+  // Guard against interpolating anything but our own generated db names.
+  function assertSafeDbName(name: string): void {
+    if (!safeDbName.test(name)) {
+      throw new Error(`Refusing to operate on unexpected database name: ${name}`)
+    }
+  }
+
   return {
     kind: 'local',
     async provision({ name: _name }) {
-      const dbName = newDatabaseName()
+      const dbName = newDatabaseName(dbPrefix)
       assertSafeDbName(dbName)
       const admin = postgres(adminUrl, { max: 1, prepare: false, onnotice: () => {} })
       try {

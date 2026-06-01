@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./app": "./src/app.ts",
-    "./types": "./src/serializers.ts"
+    "./types": "./src/serializers.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "dev": "bun --env-file=../../.env --watch src/index.ts",
