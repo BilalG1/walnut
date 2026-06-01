@@ -71,6 +71,37 @@ function stripSqlNoise(sql: string): string {
     .replace(/"(?:""|[^"])*"/g, '""')
 }
 
+/** EXPLAIN's own option words — skipped when scanning an EXPLAIN body so e.g. the
+ * `ANALYZE` option doesn't get mistaken for a standalone `ANALYZE` (db:ddl). */
+const EXPLAIN_OPTION_TOKENS: ReadonlySet<string> = new Set([
+  'ANALYZE', 'VERBOSE', 'COSTS', 'SETTINGS', 'GENERIC', 'PLAN', 'BUFFERS', 'WAL',
+  'TIMING', 'SUMMARY', 'FORMAT', 'MEMORY', 'SERIALIZE', 'TEXT', 'XML', 'JSON',
+  'YAML', 'ON', 'OFF', 'TRUE', 'FALSE',
+])
+
+/** Add every non-read scope implied by the statement's keywords. */
+function addModifyingScopes(tokens: readonly string[], scopes: Set<DbScope>, skip?: ReadonlySet<string>): void {
+  for (const token of tokens) {
+    if (skip?.has(token) === true) {
+      continue
+    }
+    const scope = KEYWORD_SCOPE[token]
+    if (scope !== undefined && scope !== 'db:read') {
+      scopes.add(scope)
+    }
+  }
+}
+
+/** True for `COPY ... FROM PROGRAM` / `COPY ... TO PROGRAM` (runs shell on the DB host). */
+function copiesViaProgram(tokens: readonly string[]): boolean {
+  for (let i = 1; i < tokens.length; i += 1) {
+    if (tokens[i] === 'PROGRAM' && (tokens[i - 1] === 'FROM' || tokens[i - 1] === 'TO')) {
+      return true
+    }
+  }
+  return false
+}
+
 function classifyStatementInto(tokens: readonly string[], scopes: Set<DbScope>): void {
   const first = tokens[0]
   if (first === undefined) {
@@ -81,11 +112,37 @@ function classifyStatementInto(tokens: readonly string[], scopes: Set<DbScope>):
   // statement and add every non-read scope its keywords imply.
   if (first === 'WITH') {
     scopes.add('db:read')
-    for (const token of tokens) {
-      const scope = KEYWORD_SCOPE[token]
-      if (scope !== undefined && scope !== 'db:read') {
-        scopes.add(scope)
-      }
+    addModifyingScopes(tokens, scopes)
+    return
+  }
+
+  // EXPLAIN ANALYZE *executes* the analyzed statement (including its writes /
+  // deletes / CREATE TABLE AS), so it needs the inner operation's scopes. Plain
+  // EXPLAIN only plans, so it stays db:read.
+  if (first === 'EXPLAIN') {
+    scopes.add('db:read')
+    if (tokens.includes('ANALYZE')) {
+      addModifyingScopes(tokens, scopes, EXPLAIN_OPTION_TOKENS)
+    }
+    return
+  }
+
+  // SET ROLE / SET SESSION AUTHORIZATION can switch the effective DB role, so
+  // they require the most privileged scope; other SETs are read-level.
+  if (first === 'SET') {
+    if (tokens[1] === 'ROLE' || (tokens[1] === 'SESSION' && tokens[2] === 'AUTHORIZATION')) {
+      scopes.add('db:ddl')
+    } else {
+      scopes.add('db:read')
+    }
+    return
+  }
+
+  // COPY ... FROM/TO PROGRAM executes shell commands on the database host.
+  if (first === 'COPY') {
+    scopes.add('db:write')
+    if (copiesViaProgram(tokens)) {
+      scopes.add('db:ddl')
     }
     return
   }

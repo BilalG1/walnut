@@ -75,6 +75,13 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 - **Approval loop:** an agent calls `POST /agent/v1/scope-requests`; the request appears as a
   dashboard notification; the user approves/denies (`/api/scope-requests/:id/approve|deny`).
   Approval merges the scopes into the agent.
+- **Classifier is the sole guard (for now).** Agent queries currently run over the project's
+  **owner** connection, so `classifySql` is the only thing stopping a privileged op. It's written
+  to fail safe (unknown leading keyword → `db:ddl`) and handles the nasty cases —
+  multi-statement batches, writable CTEs, `EXPLAIN ANALYZE` (which *executes*), `SET ROLE`,
+  `COPY … FROM PROGRAM`, comments, string/dollar-quote literals. **If you add SQL features,
+  add classifier tests for them.** Defense-in-depth TODO: provision a restricted per-agent
+  Postgres role so DB privileges back up the classifier.
 
 ## Designed-for (not built yet) — keep these in mind
 

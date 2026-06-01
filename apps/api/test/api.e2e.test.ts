@@ -13,13 +13,13 @@ let h: Harness
 
 beforeAll(async () => {
   h = await createHarness()
-})
+}, 30_000)
 afterAll(async () => {
   await h.dispose()
-})
+}, 30_000)
 beforeEach(async () => {
   await h.reset()
-})
+}, 15_000)
 
 async function newProject(name = 'proj'): Promise<{ id: string }> {
   const res = await h.api.api.projects.post({ name })
@@ -184,6 +184,31 @@ describe('agent query scope enforcement', () => {
     expect(res.status).toBe(403)
     const body = res.error?.value as ErrorBody | undefined
     expect(body?.missingScopes).toEqual(['db:ddl'])
+  })
+
+  test('a read-only agent cannot delete via EXPLAIN ANALYZE', async () => {
+    const project = await newProject()
+    const agent = await newAgent(project.id)
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
+    // Seed a table with a row using the privileged grant.
+    await h.api.agent.v1.query.post({ sql: 'CREATE TABLE t (id int)' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO t VALUES (1)' }, { headers: auth })
+
+    // A second, read-only agent must not be able to run EXPLAIN ANALYZE DELETE.
+    const reader = await newAgent(project.id, 'reader')
+    await grant(reader.apiKey, project.id, ['db:read'])
+    const res = await h.api.agent.v1.query.post(
+      { sql: 'EXPLAIN ANALYZE DELETE FROM t' },
+      { headers: bearer(reader.apiKey) },
+    )
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.missingScopes).toEqual(['db:delete'])
+
+    // Confirm the row is still there.
+    const check = await h.api.agent.v1.query.post({ sql: 'SELECT count(*) AS c FROM t' }, { headers: auth })
+    expect(check.data?.rows).toEqual([{ c: '1' }])
   })
 
   test('granting scopes enables the full read/write/ddl lifecycle', async () => {

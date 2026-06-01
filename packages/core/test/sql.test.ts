@@ -62,6 +62,35 @@ describe('classifySql', () => {
     ])
   })
 
+  test('EXPLAIN ANALYZE requires the analyzed statement’s scopes (it executes)', () => {
+    // Plain EXPLAIN only plans -> read.
+    expect(scopes('EXPLAIN SELECT * FROM t')).toEqual(['db:read'])
+    expect(scopes('EXPLAIN DELETE FROM t')).toEqual(['db:read'])
+    // EXPLAIN ANALYZE actually runs the statement -> needs its scope.
+    expect(scopes('EXPLAIN ANALYZE SELECT 1')).toEqual(['db:read'])
+    expect(scopes('EXPLAIN ANALYZE DELETE FROM accounts')).toEqual(['db:delete', 'db:read'])
+    expect(scopes('EXPLAIN ANALYZE UPDATE accounts SET balance = 0')).toEqual(['db:read', 'db:write'])
+    expect(scopes('EXPLAIN (ANALYZE, BUFFERS) INSERT INTO logs VALUES (1)')).toEqual(['db:read', 'db:write'])
+    expect(scopes('EXPLAIN ANALYZE CREATE TABLE x AS SELECT 1')).toEqual(['db:ddl', 'db:read'])
+    expect(scopes('EXPLAIN ANALYZE WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d')).toEqual([
+      'db:delete',
+      'db:read',
+    ])
+  })
+
+  test('SET ROLE / SESSION AUTHORIZATION require db:ddl; other SETs are read', () => {
+    expect(scopes('SET search_path = public')).toEqual(['db:read'])
+    expect(scopes('SET ROLE postgres')).toEqual(['db:ddl'])
+    expect(scopes('SET SESSION AUTHORIZATION someone')).toEqual(['db:ddl'])
+    expect(scopes('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY')).toEqual(['db:read'])
+  })
+
+  test('COPY ... FROM/TO PROGRAM requires db:ddl (host command execution)', () => {
+    expect(scopes('COPY t FROM STDIN')).toEqual(['db:write'])
+    expect(scopes("COPY t FROM PROGRAM 'rm -rf /'")).toEqual(['db:ddl', 'db:write'])
+    expect(scopes("COPY t TO PROGRAM 'cat > /tmp/x'")).toEqual(['db:ddl', 'db:write'])
+  })
+
   test('fails safe to db:ddl for unrecognised commands', () => {
     expect(scopes('DO $$ BEGIN PERFORM 1; END $$')).toEqual(['db:ddl'])
     expect(scopes('LOCK TABLE t')).toEqual(['db:ddl'])

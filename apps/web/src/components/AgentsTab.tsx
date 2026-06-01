@@ -61,7 +61,11 @@ export function AgentsTab({
 
   async function removeAgent(id: string): Promise<void> {
     setBusy(true)
-    await api.api.agents({ id }).delete()
+    setFormError(null)
+    const res = await api.api.agents({ id }).delete()
+    if (res.error !== null) {
+      setFormError(readErrorBody(res.error.value).message)
+    }
     await onAgentsChange()
     setBusy(false)
   }
@@ -76,6 +80,7 @@ export function AgentsTab({
         <div className="mt-3 flex flex-wrap gap-2">
           <select
             value={selectedProjectId ?? ''}
+            aria-label="Select project"
             onChange={(e) => onSelectProject(e.target.value)}
             className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-walnut-500"
           >
@@ -87,6 +92,7 @@ export function AgentsTab({
           </select>
           <TextInput
             value={name}
+            aria-label="Agent name"
             placeholder="agent name, e.g. claude-code"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {

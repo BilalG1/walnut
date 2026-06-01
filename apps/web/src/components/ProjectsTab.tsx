@@ -16,6 +16,7 @@ export function ProjectsTab({ projects, loading, error, onChange }: Props) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   async function create(): Promise<void> {
@@ -37,18 +38,29 @@ export function ProjectsTab({ projects, loading, error, onChange }: Props) {
 
   async function remove(id: string): Promise<void> {
     setBusy(true)
-    await api.api.projects({ id }).delete()
+    setActionError(null)
+    const res = await api.api.projects({ id }).delete()
+    if (res.error !== null) {
+      setActionError(readErrorBody(res.error.value).message)
+    }
     await onChange()
     setBusy(false)
   }
 
   async function copyConnection(id: string): Promise<void> {
+    setActionError(null)
     const res = await api.api.projects({ id }).get()
     const uri = res.data?.connectionUri
-    if (uri !== undefined && uri !== null) {
+    if (uri === undefined || uri === null) {
+      setActionError('No connection string is available for this project yet.')
+      return
+    }
+    try {
       await navigator.clipboard.writeText(uri)
       setCopiedId(id)
       globalThis.setTimeout(() => setCopiedId(null), 1500)
+    } catch {
+      setActionError('Could not copy to the clipboard (needs a secure context).')
     }
   }
 
@@ -62,6 +74,7 @@ export function ProjectsTab({ projects, loading, error, onChange }: Props) {
         <div className="mt-3 flex gap-2">
           <TextInput
             value={name}
+            aria-label="Project name"
             placeholder="project name, e.g. analytics"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
@@ -79,6 +92,7 @@ export function ProjectsTab({ projects, loading, error, onChange }: Props) {
       </Card>
 
       {error !== null && <p className="text-xs text-red-400">{error}</p>}
+      {actionError !== null && <p className="text-xs text-red-400">{actionError}</p>}
       {loading && projects.length === 0 ? (
         <Spinner label="Loading projects…" />
       ) : projects.length === 0 ? (

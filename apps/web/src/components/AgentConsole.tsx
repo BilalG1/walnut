@@ -27,6 +27,7 @@ export function AgentConsole({ apiKey, onScopeRequested }: Props) {
   const [result, setResult] = useState<QueryData | null>(null)
   const [errorBody, setErrorBody] = useState<ApiErrorBody | null>(null)
   const [requested, setRequested] = useState<string[] | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
 
   if (apiKey === undefined) {
     return (
@@ -42,6 +43,7 @@ export function AgentConsole({ apiKey, onScopeRequested }: Props) {
   async function run(): Promise<void> {
     setRunning(true)
     setRequested(null)
+    setRequestError(null)
     const res = await api.agent.v1.query.post({ sql }, { headers })
     if (res.data === null) {
       setResult(null)
@@ -54,6 +56,10 @@ export function AgentConsole({ apiKey, onScopeRequested }: Props) {
   }
 
   async function requestScopes(scopes: string[]): Promise<void> {
+    if (scopes.length === 0) {
+      return
+    }
+    setRequestError(null)
     const res = await api.agent.v1['scope-requests'].post(
       { scopes, reason: `Requested from console to run: ${sql.slice(0, 80)}` },
       { headers },
@@ -61,6 +67,8 @@ export function AgentConsole({ apiKey, onScopeRequested }: Props) {
     if (res.data !== null) {
       setRequested(scopes)
       onScopeRequested()
+    } else {
+      setRequestError(readErrorBody(res.error?.value).message)
     }
   }
 
@@ -69,6 +77,7 @@ export function AgentConsole({ apiKey, onScopeRequested }: Props) {
       <textarea
         value={sql}
         spellCheck={false}
+        aria-label="SQL to run as this agent"
         onChange={(e) => setSql(e.target.value)}
         rows={3}
         className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs text-neutral-100 outline-none focus:border-walnut-500"
@@ -99,6 +108,8 @@ export function AgentConsole({ apiKey, onScopeRequested }: Props) {
           Requested {requested.map(scopeLabel).join(' + ')} — approve it in the Notifications tab, then re-run.
         </p>
       )}
+
+      {requestError !== null && <p className="text-xs text-red-400">{requestError}</p>}
 
       {result !== null && (
         <div className="rounded-md border border-neutral-800 bg-neutral-950 p-3">
