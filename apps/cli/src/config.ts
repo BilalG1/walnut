@@ -1,3 +1,4 @@
+import { readCredentials } from './credentials.ts'
 import { EXIT } from './exit.ts'
 import { fail, type CliResult } from './output.ts'
 
@@ -13,22 +14,23 @@ function asString(value: string | boolean | undefined): string | undefined {
 }
 
 /**
- * Resolve the API URL + key from flags (highest priority) then env. Returns a
- * failure `CliResult` if no key is configured — an agent gets a key + URL injected
- * into its environment, so this never prompts.
+ * Resolve the API URL + key for an authed command: explicit flags win, otherwise the
+ * stored credentials from `walnut login`. If nothing is configured, return a failure
+ * that tells the agent exactly how to get authenticated — by asking the user to log in.
  */
-export function resolveConfig(
+export async function resolveConfig(
   options: Record<string, string | boolean>,
-  env: Record<string, string | undefined>,
+  homeDir: string,
   pretty: boolean,
-): Config | CliResult {
-  const apiUrl = asString(options['api-url']) ?? env.WALNUT_API_URL ?? DEFAULT_API_URL
-  const apiKey = asString(options['api-key']) ?? env.WALNUT_API_KEY
+): Promise<Config | CliResult> {
+  const stored = await readCredentials(homeDir)
+  const apiKey = asString(options['api-key']) ?? stored?.apiKey
+  const apiUrl = asString(options['api-url']) ?? stored?.apiUrl ?? DEFAULT_API_URL
   if (apiKey === undefined || apiKey === '') {
     return fail(
-      EXIT.USAGE,
-      'missing_api_key',
-      'No API key configured. Set WALNUT_API_KEY in the environment or pass --api-key <key>.',
+      EXIT.AUTH,
+      'not_logged_in',
+      'Not logged in. Ask the user to run `walnut login --api-key <key>` (optionally with --api-url <url>) before retrying.',
       pretty,
     )
   }

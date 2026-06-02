@@ -1,13 +1,26 @@
-import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { parseArgs } from '../src/args.ts'
 import { run, type CliIO } from '../src/cli.ts'
 import { networkError, respond } from '../src/client.ts'
+import { deleteCredentials, readCredentials, writeCredentials } from '../src/credentials.ts'
 import { EXIT, httpStatusToExit } from '../src/exit.ts'
 import { formatJson } from '../src/output.ts'
 
-/** An IO with no env and empty stdin — enough to exercise every non-network path. */
-function io(env: Record<string, string | undefined> = {}): CliIO {
-  return { env, readStdin: async () => '' }
+// A temp home with no credentials file — exercises every non-network path, including
+// "not logged in". Login/logout file behavior is covered by the e2e suite.
+let home: string
+beforeAll(async () => {
+  home = await mkdtemp(join(tmpdir(), 'walnut-cli-unit-'))
+})
+afterAll(async () => {
+  await rm(home, { recursive: true, force: true })
+})
+
+function io(): CliIO {
+  return { homeDir: home, readStdin: async () => '' }
 }
 
 function parseErr(stderr: string): { error: string; message: string } {
@@ -159,9 +172,30 @@ describe('respond / networkError (transport mapping)', () => {
 })
 
 describe('run — config (no network)', () => {
-  test('a command needing auth with no key → exit 2, never hits the network', async () => {
-    const r = await run(['whoami'], io({}))
-    expect(r.code).toBe(EXIT.USAGE)
-    expect(parseErr(r.stderr).error).toBe('missing_api_key')
+  test('a command needing auth with no credentials → exit 3, points at walnut login', async () => {
+    const r = await run(['whoami'], io())
+    expect(r.code).toBe(EXIT.AUTH)
+    const body = parseErr(r.stderr)
+    expect(body.error).toBe('not_logged_in')
+    expect(body.message).toContain('walnut login')
+  })
+})
+
+describe('credentials (file round-trip)', () => {
+  test('write → read → delete', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'walnut-cli-creds-'))
+    try {
+      expect(await readCredentials(dir)).toBeNull()
+
+      await writeCredentials(dir, { apiKey: 'wln_agt_abc', apiUrl: 'https://x.example' })
+      expect(await readCredentials(dir)).toEqual({ apiKey: 'wln_agt_abc', apiUrl: 'https://x.example' })
+
+      expect(await deleteCredentials(dir)).toBe(true)
+      expect(await readCredentials(dir)).toBeNull()
+      // deleting again is a no-op, not an error.
+      expect(await deleteCredentials(dir)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

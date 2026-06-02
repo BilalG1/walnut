@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
+import { readCredentials } from '../src/credentials.ts'
 import { createCliHarness, type CliHarness } from './harness.ts'
 
 let h: CliHarness
@@ -33,6 +34,49 @@ describe('whoami', () => {
     const r = await h.run(['whoami'], { key: 'wln_agt_nope' })
     expect(r.code).toBe(3)
     expect(parse(r.stderr).error).toBe('unauthorized')
+  })
+
+  test('not logged in → exit 3 pointing at walnut login', async () => {
+    const r = await h.run(['whoami'])
+    expect(r.code).toBe(3)
+    const body = parse(r.stderr)
+    expect(body.error).toBe('not_logged_in')
+    expect(body.message).toContain('walnut login')
+  })
+})
+
+describe('login / logout', () => {
+  test('login stores credentials that later commands use, then logout clears them', async () => {
+    const { projectId, key } = await h.makeAgent()
+
+    const loggedIn = await h.run(['login', '--api-key', key])
+    expect(loggedIn.code).toBe(0)
+    expect(parse(loggedIn.stdout).loggedIn).toBe(true)
+    expect((await readCredentials(h.homeDir))?.apiKey).toBe(key)
+
+    // whoami with no flag now resolves the stored key.
+    const who = await h.run(['whoami'])
+    expect(who.code).toBe(0)
+    expect(parse(who.stdout).project.id).toBe(projectId)
+
+    const loggedOut = await h.run(['logout'])
+    expect(loggedOut.code).toBe(0)
+    expect(parse(loggedOut.stdout).loggedOut).toBe(true)
+    expect(await readCredentials(h.homeDir)).toBeNull()
+
+    // and now we're unauthenticated again.
+    expect((await h.run(['whoami'])).code).toBe(3)
+  })
+
+  test('login persists a custom --api-url', async () => {
+    await h.run(['login', '--api-key', 'wln_agt_x', '--api-url', 'https://walnut.example.com'])
+    const creds = await readCredentials(h.homeDir)
+    expect(creds?.apiUrl).toBe('https://walnut.example.com')
+  })
+
+  test('login without --api-key → exit 2', async () => {
+    const r = await h.run(['login'])
+    expect(r.code).toBe(2)
   })
 })
 
@@ -114,14 +158,25 @@ describe('binary smoke (subprocess)', () => {
     expect(r.stdout).toMatch(/^\d+\.\d+\.\d+$/)
   })
 
-  test('missing key → exit 2 on stderr', async () => {
+  test('not logged in → exit 3 on stderr', async () => {
     const r = await h.spawn(['whoami'])
-    expect(r.code).toBe(2)
-    expect(JSON.parse(r.stderr).error).toBe('missing_api_key')
+    expect(r.code).toBe(3)
+    expect(JSON.parse(r.stderr).error).toBe('not_logged_in')
   })
 
   test('unknown command → exit 2', async () => {
     const r = await h.spawn(['frobnicate'])
     expect(r.code).toBe(2)
+  })
+
+  test('the real binary writes and removes the credentials file', async () => {
+    const login = await h.spawn(['login', '--api-key', 'wln_agt_binary', '--api-url', 'https://x.example'])
+    expect(login.code).toBe(0)
+    expect(JSON.parse(login.stdout).loggedIn).toBe(true)
+    expect((await readCredentials(h.homeDir))?.apiKey).toBe('wln_agt_binary')
+
+    const logout = await h.spawn(['logout'])
+    expect(logout.code).toBe(0)
+    expect(await readCredentials(h.homeDir)).toBeNull()
   })
 })

@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { treaty } from '@elysiajs/eden'
 import { createApp, createContext, ensureSeed, type OwnedContext } from '@walnut/api/testing'
 import { openDb, runMigrations } from '@walnut/db'
@@ -5,6 +8,7 @@ import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { run } from '../src/cli.ts'
 import type { ApiClient } from '../src/client.ts'
+import { deleteCredentials } from '../src/credentials.ts'
 import type { CliResult } from '../src/output.ts'
 
 // A dedicated metadata database + per-project db prefix so this suite is fully
@@ -83,6 +87,8 @@ export interface MakeAgentOptions {
 
 export interface CliHarness {
   ctx: OwnedContext
+  /** Temp home directory where the CLI reads/writes its credentials file. */
+  homeDir: string
   makeAgent: (opts?: MakeAgentOptions) => Promise<{ projectId: string; key: string }>
   grant: (key: string, scopes: string[]) => Promise<void>
   /** Run the CLI in-process against the real (in-memory) app — exercises routing, the
@@ -113,6 +119,7 @@ export async function createCliHarness(): Promise<CliHarness> {
   const app = createApp(ctx)
   const api = treaty(app)
   const cliEntry = `${import.meta.dir}/../src/index.ts`
+  const homeDir = await mkdtemp(join(tmpdir(), 'walnut-cli-home-'))
 
   /** A client that talks to the in-memory app with the key applied to every call. */
   function inMemoryClient(_apiUrl: string, apiKey: string): ApiClient {
@@ -148,12 +155,11 @@ export async function createCliHarness(): Promise<CliHarness> {
   }
 
   function runCli(args: string[], opts: RunOptions = {}): Promise<CliResult> {
-    const env: Record<string, string | undefined> = { WALNUT_API_URL: 'http://in-memory' }
-    if (opts.key !== undefined) {
-      env.WALNUT_API_KEY = opts.key
-    }
-    return run(args, {
-      env,
+    // A key is supplied as the --api-key flag (the credentials file is exercised by
+    // the dedicated login/logout tests).
+    const finalArgs = opts.key === undefined ? args : [...args, '--api-key', opts.key]
+    return run(finalArgs, {
+      homeDir,
       readStdin: async () => opts.stdin ?? '',
       makeClient: opts.makeClient ?? inMemoryClient,
     })
@@ -164,8 +170,9 @@ export async function createCliHarness(): Promise<CliHarness> {
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined) env[k] = v
     }
-    delete env.WALNUT_API_KEY
-    delete env.WALNUT_API_URL
+    // Point HOME at the temp dir so the real binary reads/writes creds there, never the
+    // developer's real ~/.walnut.
+    env.HOME = homeDir
     Object.assign(env, extraEnv)
 
     const proc = Bun.spawn(['bun', cliEntry, ...args], { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
@@ -180,12 +187,14 @@ export async function createCliHarness(): Promise<CliHarness> {
   async function reset(): Promise<void> {
     await ctx.db.execute(sql`TRUNCATE TABLE users RESTART IDENTITY CASCADE`)
     await ensureSeed(ctx)
+    await deleteCredentials(homeDir)
   }
 
   async function dispose(): Promise<void> {
     await ctx.close()
     await dropProjectArtifacts()
+    await rm(homeDir, { recursive: true, force: true })
   }
 
-  return { ctx, makeAgent, grant, run: runCli, spawn, reset, dispose }
+  return { ctx, homeDir, makeAgent, grant, run: runCli, spawn, reset, dispose }
 }

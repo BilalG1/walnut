@@ -1,17 +1,18 @@
 import { parseArgs } from './args.ts'
 import { type ApiClient, makeClient } from './client.ts'
-import { dbQuery, scopeLs, scopeRequest, whoami } from './commands.ts'
+import { dbQuery, login, logout, scopeLs, scopeRequest, whoami } from './commands.ts'
 import { resolveConfig } from './config.ts'
 import { EXIT } from './exit.ts'
-import { dbHelp, scopeHelp, topLevelHelp } from './help.ts'
+import { authHelp, dbHelp, scopeHelp, topLevelHelp } from './help.ts'
 import { fail, type CliResult } from './output.ts'
 import { VERSION } from './version.ts'
 
 /** Injected so the dispatcher stays testable without touching the real process or
- * network. Tests pass an in-memory `makeClient` (the sandbox firewall intercepts real
- * fetch, and it also lets a command run against a real app without a socket). */
+ * network. `homeDir` locates the credentials file; tests point it at a temp dir.
+ * Tests also pass an in-memory `makeClient` (the sandbox firewall intercepts real
+ * fetch, and it lets a command run against a real app without a socket). */
 export interface CliIO {
-  env: Record<string, string | undefined>
+  homeDir: string
   readStdin: () => Promise<string>
   makeClient?: (apiUrl: string, apiKey: string) => ApiClient
 }
@@ -27,7 +28,7 @@ async function withClient(
   pretty: boolean,
   fn: (client: ApiClient) => Promise<CliResult>,
 ): Promise<CliResult> {
-  const config = resolveConfig(options, io.env, pretty)
+  const config = await resolveConfig(options, io.homeDir, pretty)
   if ('code' in config) {
     return config
   }
@@ -102,6 +103,20 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
       }
       return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)
     }
+
+    case 'login': {
+      if (wantsHelp) return help(authHelp())
+      const apiKey = typeof parsed.options['api-key'] === 'string' ? parsed.options['api-key'] : undefined
+      if (apiKey === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'walnut login needs --api-key <key> (optionally --api-url <url>).', pretty)
+      }
+      const apiUrl = typeof parsed.options['api-url'] === 'string' ? parsed.options['api-url'] : undefined
+      return login(io.homeDir, apiKey, apiUrl, pretty)
+    }
+
+    case 'logout':
+      if (wantsHelp) return help(authHelp())
+      return logout(io.homeDir, pretty)
 
     default:
       return fail(EXIT.USAGE, 'unknown_command', `Unknown command: ${command}.`, pretty, {

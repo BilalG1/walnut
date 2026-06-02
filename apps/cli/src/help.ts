@@ -11,24 +11,39 @@ USAGE
   walnut <command> [args] [flags]
 
 COMMANDS
+  login --api-key <key>        Store credentials (the user runs this once).
+  logout                       Remove stored credentials.
   whoami                       Print this agent's identity, scopes, and project.
   db query <sql | ->           Run SQL against the project database ("-" reads stdin).
   scope ls                     List granted scopes and pending scope requests.
   scope request <scope...>     Ask the user to grant scopes (--reason to explain).
 
 GLOBAL FLAGS
-  --api-url <url>     API base URL      (env WALNUT_API_URL, default http://localhost:3001)
-  --api-key <key>     Agent API key     (env WALNUT_API_KEY)
+  --api-url <url>     API base URL (overrides the stored value; default http://localhost:3001).
+  --api-key <key>     Agent API key (overrides the stored value, for one-off calls).
   --pretty            Pretty-print JSON output (default: compact).
   -h, --help          Show help.
   --version           Show version.
 
 CONFIG
-  Set WALNUT_API_KEY and WALNUT_API_URL in the environment; flags override them.
+  Credentials live in ~/.walnut/credentials.json. Authenticate by having the user run
+  \`walnut login --api-key <key> [--api-url <url>]\` once; flags override the stored values.
 
 EXIT CODES
   0 ok   1 unexpected   2 usage   3 auth   4 insufficient-scope   5 rejected   7 network
   Errors are printed to stderr as JSON: { "error": "...", "message": "...", ... }.`
+}
+
+export function authHelp(): string {
+  return `walnut login / logout — manage stored credentials
+
+USAGE
+  walnut login --api-key <key> [--api-url <url>]   Store credentials in ~/.walnut/credentials.json
+  walnut logout                                    Remove stored credentials
+
+NOTES
+  The user creates the agent in the dashboard, which shows the key once; they pass it
+  here. Credentials are written owner-only (chmod 600). Run \`walnut whoami\` to verify.`
 }
 
 export function dbHelp(): string {

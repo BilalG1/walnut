@@ -1,5 +1,23 @@
 import { type ApiClient, networkError, respond, statusOf } from './client.ts'
+import { deleteCredentials, writeCredentials } from './credentials.ts'
 import { ok, type CliResult } from './output.ts'
+
+/** `login --api-key <key> [--api-url <url>]` → store credentials for later commands. */
+export async function login(
+  homeDir: string,
+  apiKey: string,
+  apiUrl: string | undefined,
+  pretty: boolean,
+): Promise<CliResult> {
+  const path = await writeCredentials(homeDir, apiUrl === undefined ? { apiKey } : { apiKey, apiUrl })
+  return ok({ loggedIn: true, apiUrl: apiUrl ?? null, credentialsPath: path }, pretty)
+}
+
+/** `logout` → remove stored credentials (idempotent). */
+export async function logout(homeDir: string, pretty: boolean): Promise<CliResult> {
+  const removed = await deleteCredentials(homeDir)
+  return ok({ loggedOut: true, removed }, pretty)
+}
 
 /** `whoami` → GET /agent/v1/identity. */
 export async function whoami(client: ApiClient, pretty: boolean): Promise<CliResult> {

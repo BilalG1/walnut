@@ -12,7 +12,9 @@ export const EXIT = {
   UNEXPECTED: 1,
   /** Local usage error: bad arguments, unknown command, or missing config. Never hit the network. */
   USAGE: 2,
-  /** Authentication failed — missing or invalid API key (HTTP 401). */
+  /** Authentication problem. stderr's `error` says which: `not_logged_in` (no stored
+   * credentials — ask the user to run `walnut login`) or `unauthorized` (the key was
+   * rejected, HTTP 401 — the user needs to issue a fresh key). */
   AUTH: 3,
   /** Insufficient scope (HTTP 403). stderr lists `missingScopes` and how to request them. */
   SCOPE: 4,

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
+import { homedir } from 'node:os'
 import { run } from './cli.ts'
 
 const result = await run(process.argv.slice(2), {
-  env: process.env as Record<string, string | undefined>,
+  homeDir: homedir(),
   readStdin: () => Bun.stdin.text(),
 })
 
