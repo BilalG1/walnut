@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { decodeJwt } from '../lib/auth/jwt.ts'
+import { signInWithOAuth, type OAuthProvider } from '../lib/auth/oauth.ts'
 import { devLogin } from '../lib/auth/session.ts'
 import { clearTokens, getAccessToken, subscribe } from '../lib/auth/tokens.ts'
 
@@ -12,6 +13,7 @@ export interface AuthUser {
 export interface AuthState {
   user: AuthUser | null
   signInWithDevLogin: (email: string) => Promise<void>
+  signInWithOAuth: (provider: OAuthProvider) => Promise<void>
   signOut: () => void
 }
 
@@ -42,6 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       // Token writes emit, so the subscription above updates `user`.
       signInWithDevLogin: (email: string) => devLogin(email),
+      // Navigates away to the provider; control returns via the OAuth callback page.
+      signInWithOAuth: (provider: OAuthProvider) => signInWithOAuth(provider),
       signOut: () => clearTokens(),
     }),
     [user],

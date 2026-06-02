@@ -4,8 +4,9 @@ import { SignIn } from './auth/SignIn.tsx'
 import { AgentsTab } from './components/AgentsTab.tsx'
 import { NotificationsTab } from './components/NotificationsTab.tsx'
 import { ProjectsTab } from './components/ProjectsTab.tsx'
-import { Button } from './components/ui.tsx'
+import { Button, Spinner } from './components/ui.tsx'
 import { useAgents, useProjects, useScopeRequests } from './hooks.ts'
+import { completeOAuthSignIn, isOAuthCallback } from './lib/auth/oauth.ts'
 
 type Tab = 'projects' | 'agents' | 'notifications'
 
@@ -15,13 +16,50 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'notifications', label: 'Notifications' },
 ]
 
-/** Auth gate: render the sign-in screen until there's a session, then the dashboard. */
+/** Auth gate: completes an OAuth callback, else routes between sign-in and dashboard. */
 export function App() {
   const { user } = useAuth()
-  if (user === null) {
-    return <SignIn />
+  if (user !== null) {
+    return <Dashboard user={user} />
   }
-  return <Dashboard user={user} />
+  if (isOAuthCallback()) {
+    return <OAuthCallback />
+  }
+  return <SignIn />
+}
+
+// Module-level so a StrictMode double-mount (or any remount) exchanges the single-use
+// code exactly once per page load. OAuth always arrives via a full navigation, which
+// resets this, so each real callback starts fresh.
+let oauthCallbackStarted = false
+
+function OAuthCallback() {
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (oauthCallbackStarted) {
+      return
+    }
+    oauthCallbackStarted = true
+    // On success, setTokens flips `user` and App re-renders into the dashboard.
+    void completeOAuthSignIn().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : 'Sign in failed.')
+    })
+  }, [])
+
+  return (
+    <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center px-5 py-16 text-center">
+      {error === null ? (
+        <Spinner label="Completing sign-in…" />
+      ) : (
+        <div className="flex flex-col items-center gap-3">
+          <p className="text-sm text-red-400">{error}</p>
+          <Button variant="ghost" onClick={() => window.location.assign('/')}>
+            Back to sign in
+          </Button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function Dashboard({ user }: { user: AuthUser }) {
