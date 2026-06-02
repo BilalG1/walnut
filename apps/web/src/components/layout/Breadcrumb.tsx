@@ -16,7 +16,12 @@ export function Breadcrumb() {
   }
   return (
     <div className="flex items-center gap-1.5">
-      <Link to="/orgs/$orgId" params={{ orgId }} className="mr-0.5 text-walnut-400" aria-label="Walnut home">
+      <Link
+        to="/orgs/$orgId"
+        params={{ orgId }}
+        className="mr-0.5 rounded-md text-walnut-400 outline-none focus-visible:ring-2 focus-visible:ring-walnut-500/50"
+        aria-label="Walnut home"
+      >
         <Walnut size={20} />
       </Link>
       <OrgSelector orgId={orgId} />

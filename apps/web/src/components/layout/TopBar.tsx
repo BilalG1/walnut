@@ -18,7 +18,7 @@ export function TopBar() {
           to="/orgs/$orgId/requests"
           params={{ orgId }}
           aria-label="Requests"
-          className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-800"
+          className="rounded-lg p-2 text-neutral-400 outline-none transition-colors hover:bg-neutral-800 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-walnut-500/50"
         >
           <Bell size={18} />
         </Link>

@@ -2,7 +2,8 @@ import { Link } from '@tanstack/react-router'
 import { Inbox, KeyRound, LayoutGrid, Settings, Users } from '@walnut/icons'
 import { cn } from '@walnut/ui'
 
-const BASE = 'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm'
+const BASE =
+  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-walnut-500/50'
 const INACTIVE = cn(BASE, 'text-neutral-400 hover:bg-neutral-900')
 const ACTIVE = cn(BASE, 'bg-walnut-500/10 text-walnut-200')
 
