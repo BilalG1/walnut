@@ -12,10 +12,16 @@ export function useOrganizations() {
   return useQuery({ queryKey: keys.orgs(), queryFn: fetchOrganizations })
 }
 
+/** Plain fetcher (used by the landing loader to decide between the dashboard and the
+ * guided get-started flow for a fresh org). */
+export function fetchOrgProjects(orgId: string) {
+  return unwrap(api.api.organizations({ orgId }).projects.get())
+}
+
 export function useOrgProjects(orgId: string) {
   return useQuery({
     queryKey: keys.orgProjects(orgId),
-    queryFn: () => unwrap(api.api.organizations({ orgId }).projects.get()),
+    queryFn: () => fetchOrgProjects(orgId),
   })
 }
 
@@ -26,10 +32,15 @@ export function useOrgAgents(orgId: string) {
   })
 }
 
-export function useOrgRequests(orgId: string, status: 'pending' | 'approved' | 'denied') {
+export function useOrgRequests(
+  orgId: string,
+  status: 'pending' | 'approved' | 'denied',
+  options?: { refetchInterval?: number | false },
+) {
   return useQuery({
     queryKey: keys.orgRequests(orgId, status),
     queryFn: () => unwrap(api.api.organizations({ orgId }).requests.get({ query: { status } })),
+    refetchInterval: options?.refetchInterval,
   })
 }
 

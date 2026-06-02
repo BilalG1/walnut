@@ -1,9 +1,10 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { AppLayout } from '../components/layout/AppLayout.tsx'
 import { keys } from '../data/keys.ts'
-import { fetchOrganizations } from '../data/queries.ts'
+import { fetchOrganizations, fetchOrgProjects } from '../data/queries.ts'
 import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
+import { GetStartedPage } from '../features/orgs/GetStartedPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
 import { ActivityPage } from '../features/projects/ActivityPage.tsx'
@@ -14,16 +15,26 @@ import { queryClient } from './queryClient.ts'
 
 const rootRoute = createRootRoute({ component: AppLayout })
 
-/** Landing: send the user to their personal org (or first org) home. */
+/** Landing: send the user to their personal org (or first org). A fresh org with no
+ * projects yet lands in the guided get-started flow; otherwise straight to the dashboard. */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   loader: async () => {
     const orgs = await queryClient.ensureQueryData({ queryKey: keys.orgs(), queryFn: fetchOrganizations })
     const target = orgs.find((o) => o.isPersonal) ?? orgs[0]
-    if (target !== undefined) {
-      throw redirect({ to: '/orgs/$orgId', params: { orgId: target.id } })
+    if (target === undefined) {
+      return
     }
+    const projects = await queryClient.ensureQueryData({
+      queryKey: keys.orgProjects(target.id),
+      queryFn: () => fetchOrgProjects(target.id),
+    })
+    throw redirect(
+      projects.length === 0
+        ? { to: '/orgs/$orgId/get-started', params: { orgId: target.id } }
+        : { to: '/orgs/$orgId', params: { orgId: target.id } },
+    )
   },
   component: () => <div className="p-8 text-sm text-neutral-500">You don&apos;t belong to any organization yet.</div>,
 })
@@ -31,6 +42,7 @@ const indexRoute = createRoute({
 // Org scope -----------------------------------------------------------------
 const orgRoute = createRoute({ getParentRoute: () => rootRoute, path: 'orgs/$orgId' })
 const orgIndexRoute = createRoute({ getParentRoute: () => orgRoute, path: '/', component: ProjectsPage })
+const orgGetStartedRoute = createRoute({ getParentRoute: () => orgRoute, path: 'get-started', component: GetStartedPage })
 const orgAgentsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'agents', component: AgentsPage })
 const orgRequestsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'requests', component: RequestsPage })
 const orgMembersRoute = createRoute({
@@ -59,6 +71,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   orgRoute.addChildren([
     orgIndexRoute,
+    orgGetStartedRoute,
     orgAgentsRoute,
     orgRequestsRoute,
     orgMembersRoute,

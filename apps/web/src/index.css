@@ -8,6 +8,8 @@
 
 @theme {
   --color-walnut-50: #faf6f2;
+  --color-walnut-200: #e9d8c8;
+  --color-walnut-300: #d9bfa3;
   --color-walnut-400: #c9a98a;
   --color-walnut-500: #a9805a;
   --color-walnut-600: #8a6443;
@@ -24,4 +26,31 @@ body {
   background-color: #0a0a0b;
   color: #e7e7ea;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Entrance transitions for guided flows (onboarding). Kept here as one source of truth:
+   Tailwind v4 ships no keyframe utilities for these, and several views replay them. */
+@keyframes wnut-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wnut-slide-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wnut-pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.7; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
+
+.wnut-fade-in { animation: wnut-fade-in 0.35s ease both; }
+.wnut-slide-in { animation: wnut-slide-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.wnut-pulse-ring { animation: wnut-pulse-ring 1.8s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wnut-fade-in,
+  .wnut-slide-in,
+  .wnut-pulse-ring {
+    animation: none;
+  }
 }
