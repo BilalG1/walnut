@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Tailwind v4 auto-detects sources under apps/web, but not the workspace UI package.
+   Without this, utility classes used *only* inside @walnut/ui (e.g. the Dialog overlay's
+   `inset-0` / `bg-black/60` / `pt-[12vh]`) are never generated — so modals render with
+   no full-screen backdrop. Scan the package's source so its classes ship too. */
+@source "../../../packages/ui/src";
+
 @theme {
   --color-walnut-50: #faf6f2;
   --color-walnut-400: #c9a98a;
