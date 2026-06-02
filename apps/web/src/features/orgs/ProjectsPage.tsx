@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Plus } from '@walnut/icons'
+import { GitBranch, Plus } from '@walnut/icons'
 import { Badge, Button, Card, EmptyState, Input, Spinner } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
 import { useScope } from '../../app/useScope.ts'
@@ -86,7 +86,10 @@ function ProjectsView({ orgId }: { orgId: string }) {
                       </>
                     ) : null}
                     <span>·</span>
-                    <span className="font-mono">⎇ {branch}</span>
+                    <span className="inline-flex items-center gap-1 font-mono">
+                      <GitBranch size={12} />
+                      {branch}
+                    </span>
                   </div>
                 </>
               )
