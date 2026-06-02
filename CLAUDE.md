@@ -58,8 +58,15 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
     (the `local` provider creates throwaway per-project databases).
   - Frontend component tests use `@testing-library/react` + happy-dom (preloaded via
     `apps/web/bunfig.toml`).
-- **No auth yet:** owner is hard-coded `SYSTEM_USER_ID` (`00000000-…`). Keep all data
-  scoped by `userId` so real auth slots in later.
+- **User auth (Hexclave):** dashboard `/api/*` requests carry a Hexclave-issued JWT,
+  verified offline via JWKS in `apps/api/src/auth` (`jose`; iss/aud/exp/ES256). Users
+  reach projects through **organization membership** — `organizations` /
+  `organization_members`, with a personal org JIT-provisioned on first login; scope all
+  dashboard data by org membership, never a bare `userId`. `SYSTEM_USER_ID` lives on only
+  as the seeded dev/test identity. Local sign-in without OAuth: `AUTH_DEV_BYPASS` +
+  `POST /dev/auth/login` (dev-only, fails closed in prod). Frontend: `apps/web/src/auth`
+  (Google/GitHub PKCE + dev-login). Projects get an inert `main` **branch** on creation
+  (vocabulary for future branching; no per-branch DB/role yet).
 - **Nothing is shipped — break things freely.** No users and no production data, so
   migrations, backwards compatibility, and deprecation shims are wasted effort. Reshape
   schemas, rename things, and change contracts directly; regenerate migrations from the

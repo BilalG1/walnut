@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { agentGrants, organizationMembers, organizations } from '@walnut/db'
+import { agentGrants, branches, organizationMembers, organizations } from '@walnut/db'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
 import { createApp } from '../src/app.ts'
@@ -483,6 +483,68 @@ describe('auth and org isolation', () => {
       .from(organizations)
       .where(eq(organizations.personalUserId, USER_A))
     expect(org?.isPersonal).toBe(true)
+  })
+})
+
+describe('cross-org isolation', () => {
+  const ALICE = '33333333-3333-3333-3333-333333333333'
+  const BOB = '44444444-4444-4444-4444-444444444444'
+
+  /** Alice owns a provisioned project with one agent; Bob is an unrelated user. */
+  async function aliceProjectWithAgent() {
+    const alice = await h.clientFor(ALICE, { email: 'alice@corp.test' })
+    const bob = await h.clientFor(BOB, { email: 'bob@corp.test' })
+    const proj = await alice.api.projects.post({ name: 'alice-proj' })
+    const projectId = proj.data?.id
+    if (projectId === undefined) throw new Error(`project create failed: ${JSON.stringify(proj.error?.value)}`)
+    const agentRes = await alice.api.projects({ id: projectId }).agents.post({ name: 'a-bot' })
+    const agent = agentRes.data
+    if (agent === null) throw new Error(`agent create failed: ${JSON.stringify(agentRes.error?.value)}`)
+    return { alice, bob, projectId, agentId: agent.id, agentKey: agent.apiKey }
+  }
+
+  test("a user cannot read, delete, list, or create another user's agents", async () => {
+    const { bob, projectId, agentId } = await aliceProjectWithAgent()
+    expect((await bob.api.agents({ id: agentId }).get()).status).toBe(404)
+    expect((await bob.api.agents({ id: agentId }).delete()).status).toBe(404)
+    expect((await bob.api.projects({ id: projectId }).agents.get()).status).toBe(404)
+    expect((await bob.api.projects({ id: projectId }).agents.post({ name: 'sneaky' })).status).toBe(404)
+  })
+
+  test("a user cannot see or resolve another user's scope request", async () => {
+    const { alice, bob, agentKey } = await aliceProjectWithAgent()
+    const reqRes = await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agentKey) })
+    const requestId = reqRes.data?.id
+    if (requestId === undefined) throw new Error('scope request failed')
+
+    // Alice (owner) sees it; Bob sees nothing.
+    expect((await alice.api['scope-requests'].get({ query: {} })).data?.length).toBe(1)
+    expect((await bob.api['scope-requests'].get({ query: {} })).data).toEqual([])
+
+    // Bob cannot approve or deny it...
+    expect((await bob.api['scope-requests']({ id: requestId }).approve.post()).status).toBe(404)
+    expect((await bob.api['scope-requests']({ id: requestId }).deny.post()).status).toBe(404)
+    // ...so it is still pending for Alice.
+    expect((await alice.api['scope-requests'].get({ query: { status: 'pending' } })).data?.length).toBe(1)
+  })
+
+  test("a user cannot delete another user's project", async () => {
+    const { alice, bob, projectId } = await aliceProjectWithAgent()
+    expect((await bob.api.projects({ id: projectId }).delete()).status).toBe(404)
+    // Bob's failed delete left Alice's project intact.
+    expect((await alice.api.projects({ id: projectId }).get()).status).toBe(200)
+  })
+
+  test('creating a project provisions a default main branch', async () => {
+    const alice = await h.clientFor(ALICE, { email: 'alice@corp.test' })
+    const proj = await alice.api.projects.post({ name: 'branchy' })
+    const projectId = proj.data?.id
+    if (projectId === undefined) throw new Error('project create failed')
+
+    const rows = await h.ctx.db.select().from(branches).where(eq(branches.projectId, projectId))
+    expect(rows.length).toBe(1)
+    expect(rows[0]?.name).toBe('main')
+    expect(rows[0]?.isDefault).toBe(true)
   })
 })
 
