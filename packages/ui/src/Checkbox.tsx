@@ -10,7 +10,7 @@ export function Checkbox({ label, className, ...props }: CheckboxProps) {
   const box = (
     <input
       type="checkbox"
-      className={cn('h-3.5 w-3.5 rounded border-neutral-600 bg-neutral-950 accent-walnut-500', className)}
+      className={cn('h-3.5 w-3.5 rounded border-line-strong bg-sunken accent-walnut-500', className)}
       {...props}
     />
   )
@@ -18,7 +18,7 @@ export function Checkbox({ label, className, ...props }: CheckboxProps) {
     return box
   }
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-neutral-400">
+    <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted">
       {box}
       {label}
     </label>

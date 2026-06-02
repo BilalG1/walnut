@@ -41,16 +41,16 @@ export function Dialog({ open, onClose, title, children, footer, className }: Di
         aria-modal="true"
         onMouseDown={(event) => event.stopPropagation()}
         className={cn(
-          'w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 shadow-2xl shadow-black/50',
+          'w-full max-w-md rounded-2xl border border-line bg-surface shadow-xl shadow-black/10 dark:shadow-2xl dark:shadow-black/50',
           className,
         )}
       >
         {title !== undefined ? (
-          <div className="border-b border-neutral-800 px-5 py-3.5 text-sm font-semibold">{title}</div>
+          <div className="border-b border-line px-5 py-3.5 text-sm font-semibold">{title}</div>
         ) : null}
-        <div className="px-5 py-4 text-sm text-neutral-300">{children}</div>
+        <div className="px-5 py-4 text-sm text-fg-secondary">{children}</div>
         {footer !== undefined ? (
-          <div className="flex justify-end gap-2 border-t border-neutral-800 px-5 py-3.5">{footer}</div>
+          <div className="flex justify-end gap-2 border-t border-line px-5 py-3.5">{footer}</div>
         ) : null}
       </div>
     </div>

@@ -36,7 +36,7 @@ const indexRoute = createRoute({
         : { to: '/orgs/$orgId', params: { orgId: target.id } },
     )
   },
-  component: () => <div className="p-8 text-sm text-neutral-500">You don&apos;t belong to any organization yet.</div>,
+  component: () => <div className="p-8 text-sm text-subtle">You don&apos;t belong to any organization yet.</div>,
 })
 
 // Org scope -----------------------------------------------------------------

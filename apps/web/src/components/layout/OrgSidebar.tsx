@@ -4,12 +4,12 @@ import { cn } from '@walnut/ui'
 
 const BASE =
   'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-walnut-500/50'
-const INACTIVE = cn(BASE, 'text-neutral-400 hover:bg-neutral-900')
-const ACTIVE = cn(BASE, 'bg-walnut-500/10 text-walnut-200')
+const INACTIVE = cn(BASE, 'text-muted hover:bg-hover')
+const ACTIVE = cn(BASE, 'bg-walnut-500/10 text-accent')
 
 export function OrgSidebar({ orgId }: { orgId: string }) {
   return (
-    <aside className="w-56 shrink-0 border-r border-neutral-800 p-3">
+    <aside className="w-56 shrink-0 border-r border-line p-3">
       <nav className="space-y-0.5">
         <Link
           to="/orgs/$orgId"

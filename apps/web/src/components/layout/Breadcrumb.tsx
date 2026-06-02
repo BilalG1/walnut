@@ -10,7 +10,7 @@ export function Breadcrumb() {
   if (orgId === undefined) {
     return (
       <span className="flex items-center gap-2 text-sm font-medium">
-        <Walnut size={20} className="text-walnut-400" /> Walnut
+        <Walnut size={20} className="text-accent" /> Walnut
       </span>
     )
   }
@@ -19,7 +19,7 @@ export function Breadcrumb() {
       <Link
         to="/orgs/$orgId"
         params={{ orgId }}
-        className="mr-0.5 rounded-md text-walnut-400 outline-none focus-visible:ring-2 focus-visible:ring-walnut-500/50"
+        className="mr-0.5 rounded-md text-accent outline-none focus-visible:ring-2 focus-visible:ring-walnut-500/50"
         aria-label="Walnut home"
       >
         <Walnut size={20} />
@@ -27,9 +27,9 @@ export function Breadcrumb() {
       <OrgSelector orgId={orgId} />
       {projectId !== undefined && branch !== undefined ? (
         <>
-          <span className="text-lg font-light text-neutral-700">/</span>
+          <span className="text-lg font-light text-faint">/</span>
           <ProjectSelector orgId={orgId} projectId={projectId} />
-          <span className="text-lg font-light text-neutral-700">/</span>
+          <span className="text-lg font-light text-faint">/</span>
           <BranchSelector orgId={orgId} projectId={projectId} branch={branch} />
         </>
       ) : null}

@@ -104,14 +104,14 @@ function GetStartedView({ orgId }: { orgId: string }) {
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Welcome to Walnut</h1>
-          <p className="mt-1 text-sm text-neutral-400">
+          <p className="mt-1 text-sm text-muted">
             Give your first agent scoped access to a real database — in three steps.
           </p>
         </div>
         <button
           type="button"
           onClick={() => void navigate({ to: '/orgs/$orgId', params: { orgId } })}
-          className="shrink-0 rounded-md px-2 py-1 text-xs text-neutral-500 outline-none transition-colors hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-walnut-500/50"
+          className="shrink-0 rounded-md px-2 py-1 text-xs text-subtle outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-walnut-500/50"
         >
           Skip for now
         </button>
@@ -130,7 +130,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                   <span
                     className={cn(
                       'absolute left-[15px] top-9 h-[calc(100%-12px)] w-px',
-                      done ? 'bg-walnut-500/50' : 'bg-neutral-800',
+                      done ? 'bg-walnut-500/50' : 'bg-hover',
                     )}
                   />
                 ) : null}
@@ -140,7 +140,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                   onClick={() => done && setStep(i)}
                   className={cn(
                     'flex w-full items-center gap-3 rounded-md px-1.5 py-2 text-left transition-colors',
-                    done ? 'hover:bg-neutral-900/60' : 'cursor-default',
+                    done ? 'hover:bg-hover' : 'cursor-default',
                   )}
                 >
                   <span
@@ -149,8 +149,8 @@ function GetStartedView({ orgId }: { orgId: string }) {
                       done
                         ? 'border-transparent bg-walnut-500 text-white'
                         : active
-                          ? 'border-walnut-500 bg-walnut-500/10 text-walnut-300'
-                          : 'border-neutral-700 text-neutral-500',
+                          ? 'border-walnut-500 bg-walnut-500/10 text-accent'
+                          : 'border-line-strong text-subtle',
                     )}
                   >
                     {done ? <Check size={16} strokeWidth={2.6} /> : <Icon size={16} />}
@@ -159,12 +159,12 @@ function GetStartedView({ orgId }: { orgId: string }) {
                     <span
                       className={cn(
                         'block text-sm font-medium',
-                        active ? 'text-neutral-100' : done ? 'text-neutral-300' : 'text-neutral-500',
+                        active ? 'text-fg' : done ? 'text-fg-secondary' : 'text-subtle',
                       )}
                     >
                       {s.title}
                     </span>
-                    <span className={cn('block text-xs', active ? 'text-walnut-400/80' : 'text-neutral-600')}>
+                    <span className={cn('block text-xs', active ? 'text-accent/80' : 'text-faint')}>
                       {s.blurb}
                     </span>
                   </span>
@@ -175,7 +175,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
         </ol>
 
         {/* Active panel */}
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60">
+        <div className="rounded-2xl border border-line bg-surface">
           <div key={step} className="wnut-fade-in p-8">
             {step === 0 ? (
               <section>
@@ -185,7 +185,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                   blurb="Every project gets a dedicated Postgres database with an inert main branch."
                 />
                 <form onSubmit={submitProject} className="mt-6">
-                  <label htmlFor="gs-project" className="mb-1.5 block text-xs font-medium tracking-wide text-neutral-400">
+                  <label htmlFor="gs-project" className="mb-1.5 block text-xs font-medium tracking-wide text-muted">
                     Project name
                   </label>
                   <Input
@@ -197,7 +197,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                     className="max-w-sm"
                   />
                   {projectMut.error !== null ? (
-                    <p className="mt-2 text-xs text-red-400">{projectMut.error.message}</p>
+                    <p className="mt-2 text-xs text-danger">{projectMut.error.message}</p>
                   ) : null}
                   <div className="mt-6">
                     <Button type="submit" disabled={projectMut.isPending || projectName.trim() === ''}>
@@ -218,7 +218,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                 />
                 {agent === null ? (
                   <form onSubmit={submitAgent} className="mt-6">
-                    <label htmlFor="gs-agent" className="mb-1.5 block text-xs font-medium tracking-wide text-neutral-400">
+                    <label htmlFor="gs-agent" className="mb-1.5 block text-xs font-medium tracking-wide text-muted">
                       Agent name
                     </label>
                     <Input
@@ -230,7 +230,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                       className="max-w-sm"
                     />
                     {agentMut.error !== null ? (
-                      <p className="mt-2 text-xs text-red-400">{agentMut.error.message}</p>
+                      <p className="mt-2 text-xs text-danger">{agentMut.error.message}</p>
                     ) : null}
                     <div className="mt-6">
                       <Button type="submit" disabled={agentMut.isPending || agentName.trim() === ''}>
@@ -240,12 +240,12 @@ function GetStartedView({ orgId }: { orgId: string }) {
                   </form>
                 ) : (
                   <div className="mt-6 space-y-4 wnut-slide-in">
-                    <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                      <p className="mb-2 text-xs font-medium text-amber-200/90">
+                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 dark:bg-amber-500/5 p-3">
+                      <p className="mb-2 text-xs font-medium text-amber-700 dark:text-amber-200/90">
                         Copy {agent.name}&apos;s API key now — it won&apos;t be shown again.
                       </p>
                       <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 truncate rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 font-mono text-xs text-amber-100/90">
+                        <code className="min-w-0 flex-1 truncate rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 font-mono text-xs text-amber-800 dark:text-amber-100/90">
                           {agent.apiKey}
                         </code>
                         <CopyButton value={agent.apiKey} />
@@ -253,9 +253,9 @@ function GetStartedView({ orgId }: { orgId: string }) {
                     </div>
                     <CommandBlock label="install" command="curl -fsSL https://walnut.sh/install | sh" />
                     <CommandBlock label="log in" command={`walnut login --api-key ${agent.apiKey}`} />
-                    <p className="text-xs text-neutral-500">
-                      Verify with <span className="font-mono text-neutral-300">walnut whoami</span> — you&apos;ll see{' '}
-                      <span className="font-mono text-walnut-300">scopes: []</span>. That&apos;s expected: nothing is
+                    <p className="text-xs text-subtle">
+                      Verify with <span className="font-mono text-fg-secondary">walnut whoami</span> — you&apos;ll see{' '}
+                      <span className="font-mono text-accent">scopes: []</span>. That&apos;s expected: nothing is
                       granted yet.
                     </p>
                     <div className="pt-1">
@@ -279,12 +279,12 @@ function GetStartedView({ orgId }: { orgId: string }) {
 
                 {approved ? (
                   <div className="mt-8 text-center wnut-slide-in">
-                    <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+                    <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                       <ShieldCheck size={30} />
                     </div>
                     <h3 className="text-lg font-semibold tracking-tight">You granted your first scope 🎉</h3>
-                    <p className="mx-auto mt-1.5 max-w-md text-sm text-neutral-400">
-                      <span className="text-neutral-200">{agent?.name}</span> now holds{' '}
+                    <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
+                      <span className="text-fg">{agent?.name}</span> now holds{' '}
                       {grantedScopes.map((s) => (
                         <Badge key={s} tone="walnut" mono className="mx-0.5">
                           {s}
@@ -302,54 +302,54 @@ function GetStartedView({ orgId }: { orgId: string }) {
                 ) : (
                   <div className="mt-6 space-y-5">
                     <div className="rounded-xl border border-walnut-500/30 bg-walnut-500/5 p-4">
-                      <p className="text-sm leading-relaxed text-neutral-200">{promptText}</p>
+                      <p className="text-sm leading-relaxed text-fg">{promptText}</p>
                       <div className="mt-3">
                         <CopyButton value={promptText} label="Copy prompt" variant="bordered" />
                       </div>
                     </div>
 
                     {incoming === null ? (
-                      <div className="rounded-xl border border-dashed border-neutral-800 px-6 py-10 text-center">
+                      <div className="rounded-xl border border-dashed border-line px-6 py-10 text-center">
                         <div className="relative mx-auto mb-5 h-14 w-14">
                           <span className="absolute inset-0 rounded-full bg-walnut-500/20 wnut-pulse-ring" />
                           <span
                             className="absolute inset-0 rounded-full bg-walnut-500/20 wnut-pulse-ring"
                             style={{ animationDelay: '0.9s' }}
                           />
-                          <span className="relative grid h-14 w-14 place-items-center rounded-full border border-walnut-500/40 bg-neutral-950 text-walnut-400">
+                          <span className="relative grid h-14 w-14 place-items-center rounded-full border border-walnut-500/40 bg-sunken text-accent">
                             <Bell size={22} />
                           </span>
                         </div>
-                        <div className="flex items-center justify-center gap-2 text-sm font-medium text-neutral-200">
+                        <div className="flex items-center justify-center gap-2 text-sm font-medium text-fg">
                           <Spinner className="h-4 w-4" />
                           Waiting for {agent?.name ?? 'your agent'} to request access…
                         </div>
-                        <p className="mx-auto mt-1.5 max-w-sm text-xs text-neutral-500">
-                          When it runs <span className="font-mono text-neutral-400">walnut scope request</span>, the
+                        <p className="mx-auto mt-1.5 max-w-sm text-xs text-subtle">
+                          When it runs <span className="font-mono text-muted">walnut scope request</span>, the
                           request will appear here for your approval.
                         </p>
                       </div>
                     ) : (
                       <div className="wnut-slide-in">
-                        <div className="mb-3 flex items-center gap-2 text-sm text-neutral-300">
+                        <div className="mb-3 flex items-center gap-2 text-sm text-fg-secondary">
                           <span className="relative flex h-2 w-2">
                             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-walnut-400 opacity-75" />
                             <span className="relative inline-flex h-2 w-2 rounded-full bg-walnut-500" />
                           </span>
                           New scope request
                         </div>
-                        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                        <div className="rounded-xl border border-line bg-surface p-4">
                           <div className="flex items-start gap-3">
                             <Avatar label={agent?.name ?? 'agent'} size={36} />
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-neutral-100">{agent?.name}</span>
-                                <span className="text-xs text-neutral-500">
+                                <span className="text-sm font-medium text-fg">{agent?.name}</span>
+                                <span className="text-xs text-subtle">
                                   wants to access {project?.name ?? 'your project'}
                                 </span>
                               </div>
                               {incoming.reason !== null && incoming.reason !== '' ? (
-                                <p className="mt-1 text-sm text-neutral-400">“{incoming.reason}”</p>
+                                <p className="mt-1 text-sm text-muted">“{incoming.reason}”</p>
                               ) : null}
                               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                                 {incoming.scopes.map((s) => (
@@ -359,7 +359,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
                                 ))}
                               </div>
                               {resolve.error !== null ? (
-                                <p className="mt-2 text-xs text-red-400">{resolve.error.message}</p>
+                                <p className="mt-2 text-xs text-danger">{resolve.error.message}</p>
                               ) : null}
                               <div className="mt-4 flex gap-2">
                                 <Button variant="success" size="sm" onClick={approve} disabled={resolve.isPending}>
@@ -389,12 +389,12 @@ function GetStartedView({ orgId }: { orgId: string }) {
 function PanelHeader({ icon, title, blurb }: { icon: ReactNode; title: string; blurb: string }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-neutral-800 bg-neutral-950 text-walnut-400">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-sunken text-accent">
         {icon}
       </span>
       <div>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-        <p className="mt-0.5 text-sm text-neutral-400">{blurb}</p>
+        <p className="mt-0.5 text-sm text-muted">{blurb}</p>
       </div>
     </div>
   )
@@ -402,13 +402,13 @@ function PanelHeader({ icon, title, blurb }: { icon: ReactNode; title: string; b
 
 function CommandBlock({ label, command }: { label: string; command: string }) {
   return (
-    <div className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-950">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-1.5">
-        <span className="font-mono text-[11px] text-neutral-500">{label}</span>
+    <div className="overflow-hidden rounded-md border border-line bg-sunken">
+      <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
+        <span className="font-mono text-[11px] text-subtle">{label}</span>
         <CopyButton value={command} />
       </div>
-      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[13px] text-neutral-200">
-        <span className="text-neutral-600">$ </span>
+      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[13px] text-fg">
+        <span className="text-faint">$ </span>
         {command}
       </pre>
     </div>
@@ -434,10 +434,10 @@ function CopyButton({
         setTimeout(() => setCopied(false), 1500)
       }}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded text-[11px] text-neutral-400 outline-none transition-colors hover:text-neutral-100 focus-visible:ring-2 focus-visible:ring-walnut-500/50',
+        'inline-flex items-center gap-1.5 rounded text-[11px] text-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-walnut-500/50',
         variant === 'bordered'
-          ? 'rounded-md border border-neutral-700 bg-neutral-950 px-2.5 py-1 text-neutral-300 hover:bg-neutral-800'
-          : 'px-2 py-0.5 hover:bg-neutral-800',
+          ? 'rounded-md border border-line-strong bg-sunken px-2.5 py-1 text-fg-secondary hover:bg-hover'
+          : 'px-2 py-0.5 hover:bg-hover',
       )}
     >
       <Copy size={12} />

@@ -18,7 +18,7 @@ function OverviewView({ projectId, branch }: { projectId: string; branch: string
     return (
       <PageContainer>
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="mt-2 text-sm text-red-400">{error.message}</p>
+        <p className="mt-2 text-sm text-danger">{error.message}</p>
       </PageContainer>
     )
   }
@@ -31,7 +31,7 @@ function OverviewView({ projectId, branch }: { projectId: string; branch: string
           {project?.name ?? '…'} · {branch}
         </Badge>
       </div>
-      <p className="mt-1 text-sm text-neutral-500">This branch's database, activity and health.</p>
+      <p className="mt-1 text-sm text-subtle">This branch's database, activity and health.</p>
       <div className="mt-6 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Status" value={project?.status ?? '…'} />
         <Stat label="Provider" value={project?.provider ?? '…'} />
@@ -45,7 +45,7 @@ function OverviewView({ projectId, branch }: { projectId: string; branch: string
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Card className="p-4">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-subtle">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </Card>
   )

@@ -31,11 +31,11 @@ function SettingsView({ orgId, projectId }: { orgId: string; projectId: string }
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-      <p className="mt-1 text-sm text-neutral-500">Branch settings for {project?.name ?? 'this project'}.</p>
+      <p className="mt-1 text-sm text-subtle">Branch settings for {project?.name ?? 'this project'}.</p>
 
       <Card className="mt-6 border-red-500/20 p-4">
-        <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
-        <p className="mt-1 text-sm text-neutral-400">
+        <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
+        <p className="mt-1 text-sm text-muted">
           Deleting a project tears down its database and removes its agents. This cannot be undone.
         </p>
         <Button variant="danger" className="mt-3" onClick={() => setConfirmOpen(true)}>
@@ -59,10 +59,10 @@ function SettingsView({ orgId, projectId }: { orgId: string; projectId: string }
         }
       >
         <p>
-          This permanently destroys <span className="font-medium text-neutral-200">{project?.name ?? 'this project'}</span>,
+          This permanently destroys <span className="font-medium text-fg">{project?.name ?? 'this project'}</span>,
           its database, and all its agents.
         </p>
-        {del.error !== null ? <p className="mt-2 text-xs text-red-400">{del.error.message}</p> : null}
+        {del.error !== null ? <p className="mt-2 text-xs text-danger">{del.error.message}</p> : null}
       </Dialog>
     </PageContainer>
   )

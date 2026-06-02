@@ -6,13 +6,69 @@
    no full-screen backdrop. Scan the package's source so its classes ship too. */
 @source "../../../packages/ui/src";
 
+/* Class-based dark mode (not `prefers-color-scheme`): the theme is user-controlled via
+   the account menu and persisted, so `dark:` keys off a `.dark` class on <html>. The
+   no-flash script in index.html sets it before first paint; ThemeProvider owns it after. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-walnut-50: #faf6f2;
+  --color-walnut-100: #f1e6da;
   --color-walnut-200: #e9d8c8;
   --color-walnut-300: #d9bfa3;
   --color-walnut-400: #c9a98a;
   --color-walnut-500: #a9805a;
   --color-walnut-600: #8a6443;
+  --color-walnut-700: #6f4f34;
+
+  /* Semantic tokens — the single source of theming. Values here are the LIGHT theme;
+     the `.dark` block below overrides the same variables for dark. Every component reads
+     these (`bg-surface`, `text-muted`, `border-line`, …) so a swap flips the whole UI.
+       canvas   app background           surface  cards / menus / dialogs
+       sunken   inputs / code / recessed hover    hover background
+       line     hairlines & dividers     line-strong  control borders
+       fg       primary text             fg-secondary slightly dimmer body text
+       muted    secondary text           subtle   labels / metadata
+       faint    faintest text            accent   walnut text & icons
+       danger   destructive text */
+  --color-canvas: #f6f6f7;
+  --color-surface: #ffffff;
+  --color-sunken: #f1f1f3;
+  --color-hover: #ececef;
+  --color-line: #e4e4e7;
+  --color-line-strong: #d4d4d8;
+  --color-fg: #1c1c1f;
+  --color-fg-secondary: #3f3f46;
+  --color-muted: #57575f;
+  --color-subtle: #71717a;
+  --color-faint: #a1a1aa;
+  --color-accent: #8a6443;
+  --color-danger: #dc2626;
+}
+
+/* Dark theme overrides. These hexes are the app's original dark palette, so dark mode
+   stays pixel-faithful to what shipped before light mode existed. */
+.dark {
+  --color-canvas: #0a0a0b;
+  --color-surface: #171717;
+  --color-sunken: #0a0a0a;
+  --color-hover: #262626;
+  --color-line: #262626;
+  --color-line-strong: #404040;
+  --color-fg: #e7e7ea;
+  --color-fg-secondary: #d4d4d4;
+  --color-muted: #a3a3a3;
+  --color-subtle: #737373;
+  --color-faint: #525252;
+  --color-accent: #c9a98a;
+  --color-danger: #f87171;
+}
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
 }
 
 html,
@@ -23,9 +79,11 @@ body,
 
 body {
   margin: 0;
-  background-color: #0a0a0b;
-  color: #e7e7ea;
+  background-color: var(--color-canvas);
+  color: var(--color-fg);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Ease the cross-fade when toggling themes (kept short so navigation feels instant). */
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Entrance transitions for guided flows (onboarding). Kept here as one source of truth:

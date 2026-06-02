@@ -28,13 +28,13 @@ function RequestsView({ orgId }: { orgId: string }) {
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
-      <p className="mt-1 text-sm text-neutral-500">Access agents have asked for, across every project in this organization.</p>
+      <p className="mt-1 text-sm text-subtle">Access agents have asked for, across every project in this organization.</p>
 
       <div className="mt-6 space-y-3">
         {requests.isPending ? (
           <Spinner />
         ) : requests.error !== null ? (
-          <p className="text-sm text-red-400">{requests.error.message}</p>
+          <p className="text-sm text-danger">{requests.error.message}</p>
         ) : rows.length === 0 ? (
           <EmptyState title="No pending requests" hint="When an agent asks for new access, it shows up here to approve or deny." />
         ) : (
@@ -45,19 +45,19 @@ function RequestsView({ orgId }: { orgId: string }) {
               <Card key={r.id} className={highImpact ? 'border-red-500/20 p-4' : 'p-4'}>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-medium">{agent?.name ?? 'agent'}</span>
-                  <span className="text-neutral-500">requests</span>
+                  <span className="text-subtle">requests</span>
                   {r.scopes.map((s) => (
                     <Badge key={s} tone={scopeTone(s)} mono>
                       {scopeLabel(s)}
                     </Badge>
                   ))}
-                  <span className="text-neutral-500">in</span>
-                  <span className="text-neutral-300">
+                  <span className="text-subtle">in</span>
+                  <span className="text-fg-secondary">
                     {resourceTargetLabel(r.resourceType, projectById.get(r.resourceId) ?? null)}
                   </span>
-                  <span className="ml-auto text-xs text-neutral-500">{timeAgo(r.createdAt)}</span>
+                  <span className="ml-auto text-xs text-subtle">{timeAgo(r.createdAt)}</span>
                 </div>
-                {r.reason !== null ? <p className="mt-1.5 text-sm text-neutral-300">&ldquo;{r.reason}&rdquo;</p> : null}
+                {r.reason !== null ? <p className="mt-1.5 text-sm text-fg-secondary">&ldquo;{r.reason}&rdquo;</p> : null}
                 <div className="mt-2.5 flex items-center gap-2">
                   <Button
                     variant="success"

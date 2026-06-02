@@ -4,7 +4,7 @@ import { Avatar, Menu, MenuItem, MenuLabel } from '@walnut/ui'
 import { useBranches, useOrganizations, useOrgProjects } from '../../data/queries.ts'
 
 const ORG_GRADIENT = 'from-indigo-400 to-sky-600'
-const TRIGGER = 'gap-2 px-2 py-1.5 text-sm hover:bg-neutral-800/70'
+const TRIGGER = 'gap-2 px-2 py-1.5 text-sm hover:bg-hover'
 
 export function OrgSelector({ orgId }: { orgId: string }) {
   const navigate = useNavigate()
@@ -17,7 +17,7 @@ export function OrgSelector({ orgId }: { orgId: string }) {
         <>
           <Avatar label={current?.name ?? '?'} gradient={ORG_GRADIENT} />
           <span className="font-medium">{current?.name ?? '…'}</span>
-          <ChevronDown size={14} className="text-neutral-500" />
+          <ChevronDown size={14} className="text-subtle" />
         </>
       }
     >
@@ -30,8 +30,8 @@ export function OrgSelector({ orgId }: { orgId: string }) {
         >
           <Avatar label={o.name} size={20} gradient={ORG_GRADIENT} />
           <span className="flex-1 truncate">{o.name}</span>
-          {o.isPersonal ? <span className="text-[10px] text-neutral-500">personal</span> : null}
-          {o.id === orgId ? <Check size={14} className="text-emerald-400" /> : null}
+          {o.isPersonal ? <span className="text-[10px] text-subtle">personal</span> : null}
+          {o.id === orgId ? <Check size={14} className="text-emerald-600 dark:text-emerald-400" /> : null}
         </MenuItem>
       ))}
     </Menu>
@@ -49,7 +49,7 @@ export function ProjectSelector({ orgId, projectId }: { orgId: string; projectId
         <>
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
           <span className="font-medium">{current?.name ?? '…'}</span>
-          <ChevronDown size={14} className="text-neutral-500" />
+          <ChevronDown size={14} className="text-subtle" />
         </>
       }
     >
@@ -67,7 +67,7 @@ export function ProjectSelector({ orgId, projectId }: { orgId: string; projectId
         >
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
           <span className="flex-1 truncate">{p.name}</span>
-          {p.id === projectId ? <Check size={14} className="text-emerald-400" /> : null}
+          {p.id === projectId ? <Check size={14} className="text-emerald-600 dark:text-emerald-400" /> : null}
         </MenuItem>
       ))}
     </Menu>
@@ -82,9 +82,9 @@ export function BranchSelector({ orgId, projectId, branch }: { orgId: string; pr
       triggerClassName={TRIGGER}
       trigger={
         <>
-          <GitBranch size={14} className="text-neutral-400" />
+          <GitBranch size={14} className="text-muted" />
           <span className="font-mono text-sm">{branch}</span>
-          <ChevronDown size={14} className="text-neutral-500" />
+          <ChevronDown size={14} className="text-subtle" />
         </>
       }
     >
@@ -100,10 +100,10 @@ export function BranchSelector({ orgId, projectId, branch }: { orgId: string; pr
             })
           }
         >
-          <GitBranch size={14} className="text-neutral-400" />
+          <GitBranch size={14} className="text-muted" />
           <span className="flex-1 truncate font-mono">{b.name}</span>
-          {b.isDefault ? <span className="text-[10px] text-neutral-500">default</span> : null}
-          {b.name === branch ? <Check size={14} className="text-emerald-400" /> : null}
+          {b.isDefault ? <span className="text-[10px] text-subtle">default</span> : null}
+          {b.name === branch ? <Check size={14} className="text-emerald-600 dark:text-emerald-400" /> : null}
         </MenuItem>
       ))}
     </Menu>

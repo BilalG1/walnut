@@ -1,10 +1,28 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Walnut Cloud</title>
+    <!-- Resolve the theme before first paint to avoid a flash of the wrong colors. Must
+         mirror readStoredTheme() in src/app/theme.tsx (persisted choice → OS pref → dark). -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('walnut-theme')
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+          if (theme === 'dark') document.documentElement.classList.add('dark')
+        } catch (e) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

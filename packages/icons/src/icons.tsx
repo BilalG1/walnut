@@ -131,6 +131,20 @@ export const ExternalLink = createIcon('ExternalLink', [
   { tag: 'path', attrs: { d: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6' } },
 ])
 export const Play = createIcon('Play', [{ tag: 'polygon', attrs: { points: '6 3 20 12 6 21 6 3' } }])
+export const Sun = createIcon('Sun', [
+  { tag: 'circle', attrs: { cx: 12, cy: 12, r: 4 } },
+  { tag: 'path', attrs: { d: 'M12 2v2' } },
+  { tag: 'path', attrs: { d: 'M12 20v2' } },
+  { tag: 'path', attrs: { d: 'm4.93 4.93 1.41 1.41' } },
+  { tag: 'path', attrs: { d: 'm17.66 17.66 1.41 1.41' } },
+  { tag: 'path', attrs: { d: 'M2 12h2' } },
+  { tag: 'path', attrs: { d: 'M20 12h2' } },
+  { tag: 'path', attrs: { d: 'm6.34 17.66-1.41 1.41' } },
+  { tag: 'path', attrs: { d: 'm19.07 4.93-1.41 1.41' } },
+])
+export const Moon = createIcon('Moon', [
+  { tag: 'path', attrs: { d: 'M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z' } },
+])
 export const Walnut = createIcon('Walnut', [
   { tag: 'circle', attrs: { cx: 12, cy: 12, r: 9 } },
   { tag: 'path', attrs: { d: 'M12 3v18' } },

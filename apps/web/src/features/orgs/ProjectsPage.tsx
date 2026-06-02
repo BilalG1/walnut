@@ -35,7 +35,7 @@ function ProjectsView({ orgId }: { orgId: string }) {
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-      <p className="mt-1 text-sm text-neutral-500">
+      <p className="mt-1 text-sm text-subtle">
         Open a project to work on its database — each opens on its <span className="font-mono">main</span> branch.
       </p>
 
@@ -51,13 +51,13 @@ function ProjectsView({ orgId }: { orgId: string }) {
           {create.isPending ? 'Creating…' : 'New project'}
         </Button>
       </form>
-      {create.error !== null ? <p className="mt-2 text-xs text-red-400">{create.error.message}</p> : null}
+      {create.error !== null ? <p className="mt-2 text-xs text-danger">{create.error.message}</p> : null}
 
       <div className="mt-6">
         {projects.isPending ? (
           <Spinner />
         ) : projects.error !== null ? (
-          <p className="text-sm text-red-400">{projects.error.message}</p>
+          <p className="text-sm text-danger">{projects.error.message}</p>
         ) : rows.length === 0 ? (
           <EmptyState title="No projects yet" hint="Create your first project above — each one gets its own Postgres database." />
         ) : (
@@ -73,16 +73,16 @@ function ProjectsView({ orgId }: { orgId: string }) {
                       {p.status}
                     </Badge>
                   </div>
-                  <div className="mt-1 text-xs text-neutral-500">
+                  <div className="mt-1 text-xs text-subtle">
                     {p.provider}
                     {p.region !== null ? ` · ${p.region}` : ''}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-subtle">
                     <span>{p.agentCount} agents</span>
                     {p.pendingRequestCount > 0 ? (
                       <>
                         <span>·</span>
-                        <span className="text-walnut-300">{p.pendingRequestCount} pending</span>
+                        <span className="text-accent">{p.pendingRequestCount} pending</span>
                       </>
                     ) : null}
                     <span>·</span>
@@ -100,7 +100,7 @@ function ProjectsView({ orgId }: { orgId: string }) {
                   params={{ orgId, projectId: p.id, branch }}
                   className="block"
                 >
-                  <Card className="p-4 transition-colors hover:border-walnut-500/50 hover:bg-neutral-900">{body}</Card>
+                  <Card className="p-4 transition-colors hover:border-walnut-500/50 hover:bg-hover">{body}</Card>
                 </Link>
               ) : (
                 <Card key={p.id} className="p-4">

@@ -24,11 +24,11 @@ export function OAuthCallback() {
       {error === null ? (
         <>
           <Spinner />
-          <p className="text-sm text-neutral-400">Completing sign-in…</p>
+          <p className="text-sm text-muted">Completing sign-in…</p>
         </>
       ) : (
         <>
-          <p className="text-sm text-red-400">{error}</p>
+          <p className="text-sm text-danger">{error}</p>
           <Button variant="ghost" onClick={() => window.location.assign('/')}>
             Back to sign in
           </Button>

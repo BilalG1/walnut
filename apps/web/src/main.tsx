@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { queryClient } from './app/queryClient.ts'
 import { RootGate } from './app/RootGate.tsx'
+import { ThemeProvider } from './app/theme.tsx'
 import { AuthProvider } from './auth/AuthProvider.tsx'
 import './index.css'
 
@@ -13,10 +14,12 @@ if (root === null) {
 
 createRoot(root).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <RootGate />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RootGate />
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

@@ -73,7 +73,7 @@ export function Menu({ trigger, children, align = 'start', triggerLabel, trigger
         <div
           role="menu"
           className={cn(
-            'absolute top-full z-50 mt-1.5 min-w-[14rem] rounded-xl border border-neutral-800 bg-neutral-900 p-1.5 shadow-2xl shadow-black/50',
+            'absolute top-full z-50 mt-1.5 min-w-[14rem] rounded-xl border border-line bg-surface p-1.5 shadow-xl shadow-black/10 dark:shadow-2xl dark:shadow-black/50',
             align === 'end' ? 'right-0' : 'left-0',
             panelClassName,
           )}
@@ -104,7 +104,7 @@ export function MenuItem({ children, onSelect, active = false, className }: Menu
       }}
       className={cn(
         'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
-        active ? 'bg-walnut-500/10 text-walnut-200' : 'text-neutral-200 hover:bg-neutral-800',
+        active ? 'bg-walnut-500/10 text-accent' : 'text-fg hover:bg-hover',
         className,
       )}
     >
@@ -115,12 +115,12 @@ export function MenuItem({ children, onSelect, active = false, className }: Menu
 
 export function MenuLabel({ children }: { children: ReactNode }) {
   return (
-    <div role="presentation" className="px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+    <div role="presentation" className="px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wide text-subtle">
       {children}
     </div>
   )
 }
 
 export function MenuSeparator() {
-  return <div className="my-1.5 border-t border-neutral-800" />
+  return <div className="my-1.5 border-t border-line" />
 }

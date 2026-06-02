@@ -1,8 +1,10 @@
 import { Button, Card } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
+import { useTheme } from '../app/theme.tsx'
 import githubLogo from '../assets/github.svg'
 import googleLogo from '../assets/google.svg'
-import walnutLogo from '../assets/walnut-logo-dark.svg'
+import walnutLogoDark from '../assets/walnut-logo-dark.svg'
+import walnutLogoLight from '../assets/walnut-logo-light.svg'
 import { authConfig } from '../lib/auth/config.ts'
 import type { OAuthProvider } from '../lib/auth/oauth.ts'
 import { useAuth } from './AuthProvider.tsx'
@@ -14,6 +16,8 @@ const PROVIDERS: { id: OAuthProvider; label: string; logo: string }[] = [
 
 export function SignIn() {
   const { signInWithOAuth } = useAuth()
+  const { theme } = useTheme()
+  const walnutLogo = theme === 'dark' ? walnutLogoDark : walnutLogoLight
   const [pendingProvider, setPendingProvider] = useState<OAuthProvider | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -37,8 +41,8 @@ export function SignIn() {
       <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center px-5 py-16">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <img src={walnutLogo} alt="Walnut Cloud" className="h-12 w-12" />
-          <h1 className="text-lg font-semibold tracking-tight text-neutral-50">Sign in to Walnut Cloud</h1>
-          <p className="text-xs text-neutral-500">The agent-native cloud.</p>
+          <h1 className="text-lg font-semibold tracking-tight text-fg">Sign in to Walnut Cloud</h1>
+          <p className="text-xs text-subtle">The agent-native cloud.</p>
         </div>
 
         <Card className="flex w-full flex-col gap-2 p-5">
@@ -55,9 +59,9 @@ export function SignIn() {
               </Button>
             ))
           ) : (
-            <p className="text-sm text-neutral-400">No sign-in providers are configured.</p>
+            <p className="text-sm text-muted">No sign-in providers are configured.</p>
           )}
-          {error !== null && <p className="text-xs text-red-400">{error}</p>}
+          {error !== null && <p className="text-xs text-danger">{error}</p>}
         </Card>
       </div>
     </>
@@ -100,9 +104,9 @@ function DevLoginCorner() {
     <form
       onSubmit={submit}
       title={error ?? undefined}
-      className="fixed left-3 top-3 z-50 flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900/80 px-2 py-1.5 backdrop-blur"
+      className="fixed left-3 top-3 z-50 flex items-center gap-1.5 rounded-lg border border-line bg-surface/80 px-2 py-1.5 backdrop-blur"
     >
-      <span className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">dev login</span>
+      <span className="text-[10px] font-medium uppercase tracking-wide text-subtle">dev login</span>
       <input
         id="dev-email"
         type="email"
@@ -110,8 +114,8 @@ function DevLoginCorner() {
         aria-label="dev login email"
         value={email}
         onChange={(event) => setEmail(event.target.value)}
-        className={`w-32 rounded border bg-neutral-950 px-1.5 py-0.5 text-xs text-neutral-200 outline-none focus:border-walnut-500 ${
-          error !== null ? 'border-red-500/70' : 'border-neutral-700'
+        className={`w-32 rounded border bg-sunken px-1.5 py-0.5 text-xs text-fg outline-none focus:border-walnut-500 ${
+          error !== null ? 'border-red-500/70' : 'border-line-strong'
         }`}
       />
       <button

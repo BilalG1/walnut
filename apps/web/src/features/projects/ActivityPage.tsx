@@ -27,17 +27,17 @@ function ActivityView({ projectId }: { projectId: string }) {
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
-      <p className="mt-1 text-sm text-neutral-500">Every query agents have run against this database — allowed and denied.</p>
+      <p className="mt-1 text-sm text-subtle">Every query agents have run against this database — allowed and denied.</p>
 
       <div className="mt-6">
         {isPending ? (
           <Spinner />
         ) : error !== null ? (
-          <p className="text-sm text-red-400">{error.message}</p>
+          <p className="text-sm text-danger">{error.message}</p>
         ) : rows.length === 0 ? (
           <EmptyState title="No agent queries yet" hint="Every query an agent runs against this database — allowed or denied — is logged here." />
         ) : (
-          <Card className="divide-y divide-neutral-800/70 overflow-hidden">
+          <Card className="divide-y divide-line overflow-hidden">
             {rows.map((e) => {
               const status = STATUS[e.status] ?? { tone: 'neutral' as BadgeTone, label: e.status }
               return (
@@ -51,14 +51,14 @@ function ActivityView({ projectId }: { projectId: string }) {
                       </Badge>
                     ))}
                   </span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-400">{e.sql}</span>
-                  <span className="w-16 shrink-0 text-right text-xs text-neutral-500">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{e.sql}</span>
+                  <span className="w-16 shrink-0 text-right text-xs text-subtle">
                     {e.status === 'ok' ? `${e.rowCount ?? 0} rows` : '—'}
                   </span>
-                  <span className="w-12 shrink-0 text-right text-xs text-neutral-600">
+                  <span className="w-12 shrink-0 text-right text-xs text-faint">
                     {e.durationMs !== null ? `${e.durationMs}ms` : '—'}
                   </span>
-                  <span className="w-16 shrink-0 text-right text-xs text-neutral-500">{timeAgo(e.createdAt)}</span>
+                  <span className="w-16 shrink-0 text-right text-xs text-subtle">{timeAgo(e.createdAt)}</span>
                 </div>
               )
             })}

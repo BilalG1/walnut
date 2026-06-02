@@ -31,20 +31,20 @@ function DatabaseView({ projectId }: { projectId: string }) {
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Database</h1>
-      <p className="mt-1 text-sm text-neutral-500">The owner connection for this branch's Postgres database.</p>
+      <p className="mt-1 text-sm text-subtle">The owner connection for this branch's Postgres database.</p>
 
       <div className="mt-6">
         {isPending ? (
           <Spinner />
         ) : error !== null ? (
-          <p className="text-sm text-red-400">{error.message}</p>
+          <p className="text-sm text-danger">{error.message}</p>
         ) : uri === null ? (
           <EmptyState title="No connection yet" hint={`The database is ${project?.status ?? 'not ready'}.`} />
         ) : (
           <Card className="p-4">
-            <div className="text-xs uppercase tracking-wide text-neutral-500">Connection string</div>
+            <div className="text-xs uppercase tracking-wide text-subtle">Connection string</div>
             <div className="mt-2 flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-xs text-neutral-300">
+              <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-sunken px-3 py-2 font-mono text-xs text-fg-secondary">
                 {maskConnectionUri(uri)}
               </code>
               <Button variant="ghost" onClick={copy}>
@@ -52,7 +52,7 @@ function DatabaseView({ projectId }: { projectId: string }) {
                 {copied ? 'Copied!' : 'Copy'}
               </Button>
             </div>
-            <p className="mt-2 text-xs text-neutral-600">
+            <p className="mt-2 text-xs text-faint">
               The password is hidden here; Copy puts the full URI on your clipboard. Agents never use this — they
               connect through their own scoped roles.
             </p>

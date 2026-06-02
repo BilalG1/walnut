@@ -27,7 +27,7 @@ function AgentsView({ orgId }: { orgId: string }) {
       <div className="flex items-start gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-subtle">
             Every agent identity in this organization — grant each one access per project.
           </p>
         </div>
@@ -43,43 +43,43 @@ function AgentsView({ orgId }: { orgId: string }) {
         {isPending ? (
           <Spinner />
         ) : error !== null ? (
-          <p className="text-sm text-red-400">{error.message}</p>
+          <p className="text-sm text-danger">{error.message}</p>
         ) : rows.length === 0 ? (
           <EmptyState title="No agents yet" hint="Create an agent to give it scoped, approval-gated access to a project's database." />
         ) : (
           <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-neutral-800 text-left text-neutral-500">
+                <tr className="border-b border-line text-left text-subtle">
                   <th className="px-4 py-2.5 font-medium">Agent</th>
                   <th className="px-4 py-2.5 font-medium">Access by project</th>
                   <th className="px-4 py-2.5 text-right font-medium">Created</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-800">
+              <tbody className="divide-y divide-line">
                 {rows.map((a) => {
                   const projectGrants = a.grants.filter((g) => g.resourceType === 'project')
                   return (
-                    <tr key={a.id} className="hover:bg-neutral-900/50 align-top">
+                    <tr key={a.id} className="hover:bg-hover align-top">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <Avatar label={a.name} size={28} gradient="from-sky-500 to-indigo-600" />
                           <div>
                             <div className="font-medium">{a.name}</div>
-                            <div className="font-mono text-[11px] text-neutral-500">{a.keyPrefix}</div>
+                            <div className="font-mono text-[11px] text-subtle">{a.keyPrefix}</div>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         {projectGrants.length === 0 ? (
-                          <span className="text-xs text-neutral-500">no access</span>
+                          <span className="text-xs text-subtle">no access</span>
                         ) : (
                           <div className="space-y-1.5">
                             {projectGrants.map((g) => (
                               <div key={g.resourceId} className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-neutral-400">{g.projectName ?? g.resourceId}</span>
+                                <span className="text-muted">{g.projectName ?? g.resourceId}</span>
                                 {g.scopes.length === 0 ? (
-                                  <span className="text-xs text-neutral-600">no scopes</span>
+                                  <span className="text-xs text-faint">no scopes</span>
                                 ) : (
                                   g.scopes.map((s) => (
                                     <Badge key={s} tone={scopeTone(s)} mono>
@@ -92,7 +92,7 @@ function AgentsView({ orgId }: { orgId: string }) {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right text-xs text-neutral-500">{timeAgo(a.createdAt)}</td>
+                      <td className="px-4 py-3 text-right text-xs text-subtle">{timeAgo(a.createdAt)}</td>
                     </tr>
                   )
                 })}
