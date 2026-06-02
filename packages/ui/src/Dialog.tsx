@@ -41,7 +41,7 @@ export function Dialog({ open, onClose, title, children, footer, className }: Di
         aria-modal="true"
         onMouseDown={(event) => event.stopPropagation()}
         className={cn(
-          'w-full max-w-md rounded-2xl border border-neutral-700/70 bg-neutral-900 shadow-2xl shadow-black/50',
+          'w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 shadow-2xl shadow-black/50',
           className,
         )}
       >

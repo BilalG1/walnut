@@ -73,7 +73,7 @@ export function Menu({ trigger, children, align = 'start', triggerLabel, trigger
         <div
           role="menu"
           className={cn(
-            'absolute top-full z-50 mt-1.5 min-w-[14rem] rounded-xl border border-neutral-700/70 bg-neutral-900 p-1.5 shadow-2xl shadow-black/50',
+            'absolute top-full z-50 mt-1.5 min-w-[14rem] rounded-xl border border-neutral-800 bg-neutral-900 p-1.5 shadow-2xl shadow-black/50',
             align === 'end' ? 'right-0' : 'left-0',
             panelClassName,
           )}
