@@ -108,7 +108,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
       if (wantsHelp) return help(authHelp())
       const apiKey = typeof parsed.options['api-key'] === 'string' ? parsed.options['api-key'] : undefined
       if (apiKey === undefined) {
-        return fail(EXIT.USAGE, 'usage', 'walnut login needs --api-key <key> (optionally --api-url <url>).', pretty)
+        return fail(EXIT.USAGE, 'usage', 'walnut login needs --api-key <key>.', pretty)
       }
       const apiUrl = typeof parsed.options['api-url'] === 'string' ? parsed.options['api-url'] : undefined
       return login(io.homeDir, apiKey, apiUrl, pretty)

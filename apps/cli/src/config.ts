@@ -7,7 +7,7 @@ export interface Config {
   apiKey: string
 }
 
-const DEFAULT_API_URL = 'http://localhost:3001'
+const DEFAULT_API_URL = 'https://api.walnut.sh'
 
 function asString(value: string | boolean | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined
@@ -30,7 +30,7 @@ export async function resolveConfig(
     return fail(
       EXIT.AUTH,
       'not_logged_in',
-      'Not logged in. Ask the user to run `walnut login --api-key <key>` (optionally with --api-url <url>) before retrying.',
+      'Not logged in. Ask the user to run `walnut login --api-key <key>` before retrying.',
       pretty,
     )
   }

@@ -19,7 +19,7 @@ COMMANDS
   scope request <scope...>     Ask the user to grant scopes (--reason to explain).
 
 GLOBAL FLAGS
-  --api-url <url>     API base URL (overrides the stored value; default http://localhost:3001).
+  --api-url <url>     API base URL (overrides the stored value; default https://api.walnut.sh).
   --api-key <key>     Agent API key (overrides the stored value, for one-off calls).
   --pretty            Pretty-print JSON output (default: compact).
   -h, --help          Show help.
