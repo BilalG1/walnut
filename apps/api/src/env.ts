@@ -7,12 +7,21 @@ export interface AuthEnv {
   apiBaseUrl: string
 }
 
+export interface DevAuthEnv {
+  /** Whether to mount the dev-login bypass. True only when AUTH_DEV_BYPASS is set AND
+   * NODE_ENV is not production. */
+  enabled: boolean
+  /** Hexclave secret server key — required to mint dev sessions. Absent in prod. */
+  secretServerKey?: string
+}
+
 export interface Env {
   port: number
   databaseUrl: string
   corsOrigins: string[]
   provider: ProviderConfig
   auth: AuthEnv
+  devAuth: DevAuthEnv
 }
 
 function required(name: string): string {
@@ -44,6 +53,12 @@ export function loadEnv(): Env {
     auth: {
       projectId: required('HEXCLAVE_PROJECT_ID'),
       apiBaseUrl: process.env.HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com',
+    },
+    devAuth: {
+      enabled:
+        (process.env.AUTH_DEV_BYPASS === '1' || process.env.AUTH_DEV_BYPASS === 'true') &&
+        process.env.NODE_ENV !== 'production',
+      secretServerKey: process.env.HEXCLAVE_SECRET_SERVER_KEY,
     },
   }
 }

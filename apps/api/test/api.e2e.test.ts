@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
+import { treaty } from '@elysiajs/eden'
 import { agentGrants, organizationMembers, organizations } from '@walnut/db'
 import { eq } from 'drizzle-orm'
+import { Elysia } from 'elysia'
+import { createApp } from '../src/app.ts'
+import type { HexclaveServerClient } from '../src/auth/hexclave-server.ts'
+import { devAuthRoutes } from '../src/routes/dev-auth.ts'
 import { createHarness, type Harness } from './harness.ts'
 
 interface ErrorBody {
@@ -478,6 +483,81 @@ describe('auth and org isolation', () => {
       .from(organizations)
       .where(eq(organizations.personalUserId, USER_A))
     expect(org?.isPersonal).toBe(true)
+  })
+})
+
+describe('dev login bypass', () => {
+  /** A fake Hexclave server: mints tokens with the harness keypair so they verify
+   * against the real middleware, and is get-or-create idempotent by email. */
+  function makeFakeHexclave(): HexclaveServerClient {
+    const byEmail = new Map<string, { id: string; email: string }>()
+    const emailById = new Map<string, string>()
+    return {
+      async getOrCreateUser(email) {
+        const key = email.trim().toLowerCase()
+        let user = byEmail.get(key)
+        if (user === undefined) {
+          user = { id: crypto.randomUUID(), email: key }
+          byEmail.set(key, user)
+          emailById.set(user.id, key)
+        }
+        return user
+      },
+      async createSession(userId) {
+        const email = emailById.get(userId)
+        const accessToken = await h.mintToken(userId, email !== undefined ? { email } : {})
+        return { accessToken, refreshToken: `refresh_${userId}` }
+      },
+    }
+  }
+
+  function devClient() {
+    return treaty(new Elysia().use(devAuthRoutes(makeFakeHexclave())))
+  }
+
+  test('returns tokens that authenticate against the dashboard', async () => {
+    const dev = devClient()
+    const res = await dev.dev.auth.login.post({ email: 'Dev@Example.com' })
+    expect(res.status).toBe(200)
+    expect(typeof res.data?.accessToken).toBe('string')
+    expect(typeof res.data?.refreshToken).toBe('string')
+
+    const auth = bearer(res.data?.accessToken ?? '')
+    const created = await h.api.api.projects.post({ name: 'dev-proj' }, { headers: auth })
+    expect(created.status).toBe(200)
+    const list = await h.api.api.projects.get({ headers: auth })
+    expect(list.data?.length).toBe(1)
+  })
+
+  test('is idempotent for the same email (same user and org)', async () => {
+    const dev = devClient()
+    const first = await dev.dev.auth.login.post({ email: 'repeat@example.com' })
+    await h.api.api.projects.post({ name: 'p1' }, { headers: bearer(first.data?.accessToken ?? '') })
+
+    // A second login with the same email resolves to the same user, so it sees p1.
+    const second = await dev.dev.auth.login.post({ email: 'repeat@example.com' })
+    const list = await h.api.api.projects.get({ headers: bearer(second.data?.accessToken ?? '') })
+    expect(list.data?.length).toBe(1)
+    expect(list.data?.[0]?.name).toBe('p1')
+  })
+
+  test('rejects a malformed email with 422', async () => {
+    const dev = devClient()
+    const res = await dev.dev.auth.login.post({ email: 'not-an-email' })
+    expect(res.status).toBe(422)
+  })
+
+  test('is not mounted unless a dev-login client is supplied', async () => {
+    // The default app (no devLogin option) has no /dev/auth/login route.
+    const plain = createApp(h.ctx)
+    const res = await plain.handle(
+      new Request('http://localhost/dev/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'x@example.com' }),
+      }),
+    )
+    expect(res.status).toBe(404)
   })
 })
 
