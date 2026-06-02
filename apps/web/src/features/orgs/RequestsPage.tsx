@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Spinner } from '@walnut/ui'
+import { Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useOrgAgents, useOrgRequests, useResolveRequest } from '../../data/queries.ts'
@@ -34,7 +34,7 @@ function RequestsView({ orgId }: { orgId: string }) {
         ) : requests.error !== null ? (
           <p className="text-sm text-red-400">{requests.error.message}</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-neutral-500">No pending requests.</p>
+          <EmptyState title="No pending requests" hint="When an agent asks for new access, it shows up here to approve or deny." />
         ) : (
           rows.map((r) => {
             const agent = agentById.get(r.agentId)

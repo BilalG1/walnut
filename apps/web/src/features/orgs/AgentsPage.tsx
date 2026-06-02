@@ -1,5 +1,5 @@
 import { Plus } from '@walnut/icons'
-import { Avatar, Badge, Button, Card, Spinner } from '@walnut/ui'
+import { Avatar, Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
@@ -49,7 +49,7 @@ function AgentsView({ orgId }: { orgId: string }) {
         ) : error !== null ? (
           <p className="text-sm text-red-400">{error.message}</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-neutral-500">No agents yet.</p>
+          <EmptyState title="No agents yet" hint="Create an agent to give it scoped, approval-gated access to a project's database." />
         ) : (
           <Card className="overflow-hidden">
             <table className="w-full text-sm">

@@ -1,4 +1,4 @@
-import { Badge, type BadgeTone, Card, Spinner } from '@walnut/ui'
+import { Badge, type BadgeTone, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useActivity } from '../../data/queries.ts'
@@ -35,7 +35,7 @@ function ActivityView({ projectId }: { projectId: string }) {
         ) : error !== null ? (
           <p className="text-sm text-red-400">{error.message}</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-neutral-500">No agent queries yet.</p>
+          <EmptyState title="No agent queries yet" hint="Every query an agent runs against this database — allowed or denied — is logged here." />
         ) : (
           <Card className="divide-y divide-neutral-800/70 overflow-hidden">
             {rows.map((e) => {

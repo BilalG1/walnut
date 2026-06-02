@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { Plus } from '@walnut/icons'
-import { Badge, Button, Card, Input, Spinner } from '@walnut/ui'
+import { Badge, Button, Card, EmptyState, Input, Spinner } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
@@ -59,7 +59,7 @@ function ProjectsView({ orgId }: { orgId: string }) {
         ) : projects.error !== null ? (
           <p className="text-sm text-red-400">{projects.error.message}</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-neutral-500">No projects yet — create one above.</p>
+          <EmptyState title="No projects yet" hint="Create your first project above — each one gets its own Postgres database." />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {rows.map((p) => {

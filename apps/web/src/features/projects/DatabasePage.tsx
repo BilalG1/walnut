@@ -1,5 +1,5 @@
 import { Copy } from '@walnut/icons'
-import { Button, Card, Spinner } from '@walnut/ui'
+import { Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
@@ -39,7 +39,7 @@ function DatabaseView({ projectId }: { projectId: string }) {
         ) : error !== null ? (
           <p className="text-sm text-red-400">{error.message}</p>
         ) : uri === null ? (
-          <p className="text-sm text-neutral-500">No connection yet — the database is {project?.status ?? 'not ready'}.</p>
+          <EmptyState title="No connection yet" hint={`The database is ${project?.status ?? 'not ready'}.`} />
         ) : (
           <Card className="p-4">
             <div className="text-xs uppercase tracking-wide text-neutral-500">Connection string</div>
