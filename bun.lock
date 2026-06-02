@@ -87,6 +87,39 @@
         "drizzle-kit": "0.31.10",
       },
     },
+    "packages/icons": {
+      "name": "@walnut/icons",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@happy-dom/global-registrator": "20.9.0",
+        "@testing-library/dom": "10.4.1",
+        "@testing-library/react": "16.3.2",
+        "@types/react": "19.2.15",
+        "@types/react-dom": "19.2.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+      },
+      "peerDependencies": {
+        "react": ">=19",
+      },
+    },
+    "packages/ui": {
+      "name": "@walnut/ui",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@happy-dom/global-registrator": "20.9.0",
+        "@testing-library/dom": "10.4.1",
+        "@testing-library/react": "16.3.2",
+        "@types/react": "19.2.15",
+        "@types/react-dom": "19.2.3",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+      },
+      "peerDependencies": {
+        "react": ">=19",
+        "react-dom": ">=19",
+      },
+    },
   },
   "packages": {
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
@@ -336,6 +369,10 @@
     "@walnut/core": ["@walnut/core@workspace:packages/core"],
 
     "@walnut/db": ["@walnut/db@workspace:packages/db"],
+
+    "@walnut/icons": ["@walnut/icons@workspace:packages/icons"],
+
+    "@walnut/ui": ["@walnut/ui@workspace:packages/ui"],
 
     "@walnut/web": ["@walnut/web@workspace:apps/web"],
 
