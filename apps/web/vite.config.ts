@@ -3,7 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { type Connect, defineConfig, type Plugin } from 'vite'
+import { localServiceUrl, portFor } from '@walnut/core/ports'
+import { type Connect, defineConfig, loadEnv, type Plugin } from 'vite'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // scripts/install.sh is the single source of truth; the site just publishes it.
@@ -36,11 +37,26 @@ function installScriptPlugin(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), installScriptPlugin()],
+export default defineConfig(({ mode }) => {
   // Load env from the repo root so one .env serves api + web. Only VITE_* vars are
   // ever exposed to the client, so backend secrets in the same file stay private.
-  envDir: '../..',
-  server: { port: 3000, strictPort: true },
-  preview: { port: 3000, strictPort: true },
+  // The empty third arg loads ALL vars (not just VITE_*) so we can read the
+  // non-VITE_ PORT_PREFIX here in Node to derive ports.
+  const env = loadEnv(mode, '../..', '')
+  const prefix = env.PORT_PREFIX
+  const webPort = portFor('web', prefix)
+
+  // Default the dashboard's API base to the prefix-derived API port. If the user
+  // pinned VITE_API_URL explicitly, leave it to Vite's own env injection (defining
+  // the same key here would otherwise collide).
+  const explicitApiUrl = env.VITE_API_URL?.trim()
+  const apiUrl = explicitApiUrl || localServiceUrl('api', prefix)
+
+  return {
+    plugins: [react(), tailwindcss(), installScriptPlugin()],
+    envDir: '../..',
+    define: explicitApiUrl ? {} : { 'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl) },
+    server: { port: webPort, strictPort: true },
+    preview: { port: webPort, strictPort: true },
+  }
 })

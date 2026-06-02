@@ -26,24 +26,58 @@ packages/
   db/    Drizzle schema + client + migrations (drizzle/)
 ```
 
-## Ports (everything on 3xxx)
+## Ports — one `PORT_PREFIX` knob (default `30`)
 
-- Frontend: **3000** · API: **3001** · Postgres: **3002** (container 5432)
+Every local port — and the connection strings that embed one — derives from a single
+two-digit `PORT_PREFIX`. Default `30` → Frontend **3000** · API **3001** · Postgres
+**3002** (container 5432). Service offsets: web `00` · api `01` · postgres `02`.
+
+The derivation lives in `packages/core/src/ports.ts` (`portFor`, `localPostgresUrl`,
+…) and is the **single source of truth** — `apps/api/src/env.ts`, `apps/web/vite.config.ts`,
+drizzle/migrate/reset, the test `harness.ts`, and `docker-compose.yml` all read it.
+**If you add a new port or connection string, derive it from here — never hardcode.**
+
+**Spin up a second, fully-isolated stack** (its own container, volume, network, ports)
+by picking a different two-digit prefix — no other edits:
+
+```bash
+export PORT_PREFIX=41                 # → web 4100 / api 4101 / postgres 4102
+docker compose up -d && bun run db:migrate && bun run dev
+```
+
+Set `PORT_PREFIX` in `.env` or export it in the shell (`docker compose` auto-reads the
+repo-root `.env`). Individual port-bearing vars (`PORT`, `DATABASE_URL`, `CORS_ORIGIN`,
+`VITE_API_URL`, `LOCAL_PG_ADMIN_URL`) still override the derived defaults when set — but
+if you set them, keep them consistent with the prefix or the single-knob promise breaks.
+
+**Before choosing a prefix, confirm you won't collide with another stack.** Each prefix
+owns a `41xx`-style port block plus a `walnut-<prefix>` compose project /
+`walnut-postgres-<prefix>` container / `walnut-pgdata-<prefix>` volume. Reusing a prefix
+another running copy already holds fails on the host-port bind or duplicate container
+name. Check first:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Ports}}' | grep walnut   # which prefixes are taken
+lsof -iTCP:4100-4102 -sTCP:LISTEN                            # are the target ports free
+```
+
+Two digits only (`11`–`99`); a bad prefix throws at startup (`normalizePortPrefix`).
 
 ## Commands
 
 ```bash
 bun install
-docker compose up -d                 # Postgres on 3002
-bun run db:migrate                   # apply migrations (needs DATABASE_URL)
+docker compose up -d                 # Postgres on <prefix>02 (3002 by default)
+bun run db:migrate                   # apply migrations (DATABASE_URL, or the PORT_PREFIX default)
 bun run dev                          # web + api together
 bun run check                        # lint + typecheck + test (run before every commit)
 bun run lint | typecheck | test      # individually
 bun run db:generate                  # regenerate SQL migrations after schema changes
 ```
 
-`.env` holds `NEON_API_KEY`, `DATABASE_URL`, `DB_PROVIDER` (`local`|`neon`),
-`LOCAL_PG_ADMIN_URL`. See `.env.example`.
+`.env` holds `PORT_PREFIX` (see Ports above), `NEON_API_KEY`, `DB_PROVIDER`
+(`local`|`neon`), and optional overrides `DATABASE_URL` / `LOCAL_PG_ADMIN_URL`
+(derived from `PORT_PREFIX` when unset). See `.env.example`.
 
 ## Conventions (follow these)
 

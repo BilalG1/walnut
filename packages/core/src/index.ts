@@ -29,6 +29,16 @@ export { runSql } from './query.ts'
 export type { QueryResult } from './query.ts'
 
 export {
+  DEFAULT_PORT_PREFIX,
+  PORT_OFFSETS,
+  normalizePortPrefix,
+  portFor,
+  localPostgresUrl,
+  localServiceUrl,
+} from './ports.ts'
+export type { PortService, LocalDbUrlOptions } from './ports.ts'
+
+export {
   setupProjectRoles,
   createAgentRole,
   syncAgentScopes,

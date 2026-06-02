@@ -1,4 +1,5 @@
 import type { ProviderConfig, ProviderKind } from '@walnut/core'
+import { localPostgresUrl, localServiceUrl, portFor } from '@walnut/core/ports'
 
 export interface AuthEnv {
   /** Hexclave project id; also the access-token audience. */
@@ -38,16 +39,21 @@ export function loadEnv(): Env {
     throw new Error(`DB_PROVIDER must be "local" or "neon", got "${providerKind}"`)
   }
 
+  // Every local port — and the connection strings that embed one — derives from a
+  // single PORT_PREFIX (default "30" -> 3000/3001/3002). Explicit env vars still win,
+  // so production/Neon can pin a remote DATABASE_URL etc.
+  const prefix = process.env.PORT_PREFIX
+
   return {
-    port: Number(process.env.PORT ?? '3001'),
-    databaseUrl: required('DATABASE_URL'),
-    corsOrigins: (process.env.CORS_ORIGIN ?? 'http://localhost:3000')
+    port: process.env.PORT ? Number(process.env.PORT) : portFor('api', prefix),
+    databaseUrl: process.env.DATABASE_URL?.trim() || localPostgresUrl({ database: 'walnut', prefix }),
+    corsOrigins: (process.env.CORS_ORIGIN ?? localServiceUrl('web', prefix))
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s.length > 0),
     provider: {
       kind: providerKind,
-      localAdminUrl: process.env.LOCAL_PG_ADMIN_URL,
+      localAdminUrl: process.env.LOCAL_PG_ADMIN_URL?.trim() || localPostgresUrl({ database: 'postgres', prefix }),
       neonApiKey: process.env.NEON_API_KEY,
     },
     auth: {

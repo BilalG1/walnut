@@ -1,5 +1,6 @@
 import { treaty } from '@elysiajs/eden'
 import { SYSTEM_USER_ID } from '@walnut/core'
+import { localPostgresUrl } from '@walnut/core/ports'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
@@ -8,7 +9,8 @@ import { createTestAuth, type TestAuth } from '../src/auth/test-auth.ts'
 import { createContext, type OwnedContext } from '../src/context.ts'
 import { ensureSeed } from '../src/seed.ts'
 
-const ADMIN_URL = process.env.TEST_PG_ADMIN_URL ?? 'postgres://walnut:walnut@localhost:3002/postgres'
+const ADMIN_URL =
+  process.env.TEST_PG_ADMIN_URL?.trim() || localPostgresUrl({ database: 'postgres', prefix: process.env.PORT_PREFIX })
 const TEST_DB = process.env.TEST_DB_NAME ?? 'walnut_test'
 
 function withDatabase(adminUrl: string, db: string): string {
