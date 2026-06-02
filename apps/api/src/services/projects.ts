@@ -1,9 +1,9 @@
 import { type ProvisionedDatabase, setupProjectRoles } from '@walnut/core'
-import { branches, organizationMembers, projects, type Project } from '@walnut/db'
-import { and, desc, eq } from 'drizzle-orm'
+import { agents, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
+import { and, count, desc, eq, inArray } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
-import { getDefaultOrgId } from './organizations.ts'
+import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
 
 /** A user's projects: those in any organization they're a member of. */
 export async function listProjects(ctx: AppContext, userId: string): Promise<Project[]> {
@@ -14,6 +14,64 @@ export async function listProjects(ctx: AppContext, userId: string): Promise<Pro
     .where(eq(organizationMembers.userId, userId))
     .orderBy(desc(projects.createdAt))
   return rows.map((r) => r.project)
+}
+
+/** A project plus the at-a-glance counts the org home shows on each card. */
+export interface OrgProjectRow {
+  project: Project
+  agentCount: number
+  pendingRequestCount: number
+  defaultBranch: string | null
+}
+
+/** Projects in one organization (caller must be a member), with per-project counts. */
+export async function listOrgProjects(ctx: AppContext, orgId: string, userId: string): Promise<OrgProjectRow[]> {
+  await assertOrgMember(ctx, orgId, userId)
+  const rows = await ctx.db
+    .select()
+    .from(projects)
+    .where(eq(projects.organizationId, orgId))
+    .orderBy(desc(projects.createdAt))
+  if (rows.length === 0) {
+    return []
+  }
+  const ids = rows.map((p) => p.id)
+
+  const agentCounts = await ctx.db
+    .select({ projectId: agents.projectId, n: count() })
+    .from(agents)
+    .where(inArray(agents.projectId, ids))
+    .groupBy(agents.projectId)
+  const pendingCounts = await ctx.db
+    .select({ projectId: scopeRequests.projectId, n: count() })
+    .from(scopeRequests)
+    .where(and(inArray(scopeRequests.projectId, ids), eq(scopeRequests.status, 'pending')))
+    .groupBy(scopeRequests.projectId)
+  const defaultBranches = await ctx.db
+    .select({ projectId: branches.projectId, name: branches.name })
+    .from(branches)
+    .where(and(inArray(branches.projectId, ids), eq(branches.isDefault, true)))
+
+  const agentByProject = new Map(agentCounts.map((r) => [r.projectId, Number(r.n)]))
+  const pendingByProject = new Map(pendingCounts.map((r) => [r.projectId, Number(r.n)]))
+  const branchByProject = new Map(defaultBranches.map((r) => [r.projectId, r.name]))
+
+  return rows.map((project) => ({
+    project,
+    agentCount: agentByProject.get(project.id) ?? 0,
+    pendingRequestCount: pendingByProject.get(project.id) ?? 0,
+    defaultBranch: branchByProject.get(project.id) ?? null,
+  }))
+}
+
+/** A project's branches (caller must be a member of its org). Default branch first. */
+export async function listBranches(ctx: AppContext, projectId: string, userId: string): Promise<Branch[]> {
+  await getProject(ctx, projectId, userId)
+  return ctx.db
+    .select()
+    .from(branches)
+    .where(eq(branches.projectId, projectId))
+    .orderBy(desc(branches.isDefault), branches.name)
 }
 
 /** Fetch a project by id with no ownership check (internal/agent callers only). */

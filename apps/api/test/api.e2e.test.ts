@@ -632,3 +632,87 @@ async function grant(apiKey: string, _projectId: string, scopes: ('db:read' | 'd
   }
   await h.api.api['scope-requests']({ id }).approve.post()
 }
+
+/** The caller's personal org id (every user gets one on first auth). */
+async function personalOrgId(): Promise<string> {
+  const res = await h.api.api.organizations.get()
+  const org = res.data?.find((o) => o.isPersonal)
+  if (org === undefined) {
+    throw new Error(`no personal org: ${JSON.stringify(res.error?.value ?? res.data)}`)
+  }
+  return org.id
+}
+
+describe('organizations', () => {
+  test('GET /api/organizations returns the caller as owner of their personal org', async () => {
+    const res = await h.api.api.organizations.get()
+    expect(res.status).toBe(200)
+    const personal = res.data?.find((o) => o.isPersonal)
+    expect(personal).toBeDefined()
+    expect(personal?.role).toBe('owner')
+  })
+
+  test('GET /api/organizations/:orgId/projects lists projects with at-a-glance counts', async () => {
+    const project = await newProject('counts')
+    await newAgent(project.id, 'a1')
+    await newAgent(project.id, 'a2')
+    const orgId = await personalOrgId()
+
+    const res = await h.api.api.organizations({ orgId }).projects.get()
+    expect(res.status).toBe(200)
+    const row = res.data?.find((p) => p.id === project.id)
+    expect(row?.agentCount).toBe(2)
+    expect(row?.pendingRequestCount).toBe(0)
+    expect(row?.defaultBranch).toBe('main')
+  })
+
+  test('pendingRequestCount counts only open scope requests', async () => {
+    const project = await newProject('pending')
+    const agent = await newAgent(project.id, 'bot')
+    await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agent.apiKey) })
+    const orgId = await personalOrgId()
+
+    const res = await h.api.api.organizations({ orgId }).projects.get()
+    expect(res.data?.find((p) => p.id === project.id)?.pendingRequestCount).toBe(1)
+  })
+
+  test('GET /api/organizations/:orgId/agents is the org-wide roster with project names', async () => {
+    const project = await newProject('roster')
+    await newAgent(project.id, 'roster-bot')
+    const orgId = await personalOrgId()
+
+    const res = await h.api.api.organizations({ orgId }).agents.get()
+    expect(res.status).toBe(200)
+    expect(res.data?.find((a) => a.name === 'roster-bot')?.projectName).toBe('roster')
+  })
+
+  test('a non-member cannot read another org\'s projects or agents (404, no existence leak)', async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('11111111-1111-1111-1111-111111111111', { email: 'stranger@example.com' })
+    expect((await stranger.api.organizations({ orgId }).projects.get()).status).toBe(404)
+    expect((await stranger.api.organizations({ orgId }).agents.get()).status).toBe(404)
+  })
+})
+
+describe('branches', () => {
+  test('GET /api/projects/:id/branches returns the default main branch', async () => {
+    const project = await newProject('branchy')
+    const res = await h.api.api.projects({ id: project.id }).branches.get()
+    expect(res.status).toBe(200)
+    expect(res.data?.length).toBe(1)
+    expect(res.data?.[0]?.name).toBe('main')
+    expect(res.data?.[0]?.isDefault).toBe(true)
+  })
+
+  test('branches of an inaccessible project are 404', async () => {
+    const res = await h.api.api.projects({ id: '00000000-0000-0000-0000-0000000000aa' }).branches.get()
+    expect(res.status).toBe(404)
+  })
+
+  test("branches of another member's project are 404 (forbidden, not just missing)", async () => {
+    const project = await newProject('private-branchy')
+    const stranger = await h.clientFor('22222222-2222-2222-2222-222222222222', { email: 'stranger2@example.com' })
+    const res = await stranger.api.projects({ id: project.id }).branches.get()
+    expect(res.status).toBe(404)
+  })
+})

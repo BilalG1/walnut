@@ -1,8 +1,8 @@
-import { organizationMembers, organizations, users } from '@walnut/db'
-import { eq } from 'drizzle-orm'
+import { organizationMembers, organizations, users, type Organization, type OrgRole } from '@walnut/db'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import type { AuthClaims } from '../auth/verify.ts'
 import type { AppContext } from '../context.ts'
-import { HttpError } from '../errors.ts'
+import { HttpError, notFound } from '../errors.ts'
 
 function internalError(message: string): HttpError {
   return new HttpError(500, { error: 'internal_error', message })
@@ -92,4 +92,33 @@ export async function getDefaultOrgId(ctx: AppContext, userId: string): Promise<
     throw internalError('User has no organization.')
   }
   return membership.id
+}
+
+/** An organization the user belongs to, with the caller's role in it. */
+export interface OrganizationWithRole {
+  organization: Organization
+  role: OrgRole
+}
+
+/** Every organization the user is a member of (personal org first, then by name). */
+export async function listOrganizations(ctx: AppContext, userId: string): Promise<OrganizationWithRole[]> {
+  const rows = await ctx.db
+    .select({ organization: organizations, role: organizationMembers.role })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizationMembers.organizationId, organizations.id))
+    .where(eq(organizationMembers.userId, userId))
+    .orderBy(desc(organizations.isPersonal), asc(organizations.name))
+  return rows.map((r) => ({ organization: r.organization, role: r.role }))
+}
+
+/** Throw 404 unless the user is a member of the org (don't leak that it exists). */
+export async function assertOrgMember(ctx: AppContext, orgId: string, userId: string): Promise<void> {
+  const [row] = await ctx.db
+    .select({ organizationId: organizationMembers.organizationId })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.userId, userId)))
+    .limit(1)
+  if (row === undefined) {
+    throw notFound('Organization')
+  }
 }

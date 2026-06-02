@@ -1,0 +1,34 @@
+import { Elysia } from 'elysia'
+import { authenticate } from '../auth/middleware.ts'
+import type { AppContext } from '../context.ts'
+import { toOrgAgentView, toOrgProjectSummary, toOrgSummary } from '../serializers.ts'
+import { listOrgAgents } from '../services/agents.ts'
+import { listOrganizations } from '../services/organizations.ts'
+import { listOrgProjects } from '../services/projects.ts'
+
+export function organizationRoutes(ctx: AppContext) {
+  return new Elysia({ prefix: '/api/organizations' })
+    .resolve(async ({ headers, set }) => {
+      const auth = await authenticate(ctx, headers.authorization)
+      set.headers['cache-control'] = 'private, no-store'
+      return auth
+    })
+    .get('/', async ({ userId }) => {
+      const rows = await listOrganizations(ctx, userId)
+      return rows.map(({ organization, role }) => toOrgSummary(organization, role))
+    })
+    .get('/:orgId/projects', async ({ userId, params }) => {
+      const rows = await listOrgProjects(ctx, params.orgId, userId)
+      return rows.map((r) =>
+        toOrgProjectSummary(r.project, {
+          agentCount: r.agentCount,
+          pendingRequestCount: r.pendingRequestCount,
+          defaultBranch: r.defaultBranch,
+        }),
+      )
+    })
+    .get('/:orgId/agents', async ({ userId, params }) => {
+      const rows = await listOrgAgents(ctx, params.orgId, userId)
+      return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectName))
+    })
+}

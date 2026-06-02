@@ -1,5 +1,5 @@
 import { parseScopes } from '@walnut/core'
-import type { Agent, AgentGrant, Project, ScopeRequest } from '@walnut/db'
+import type { Agent, AgentGrant, Branch, Organization, Project, ScopeRequest } from '@walnut/db'
 
 export interface ProjectSummary {
   id: string
@@ -82,4 +82,57 @@ export function toScopeRequestView(r: ScopeRequest): ScopeRequestView {
     createdAt: r.createdAt.toISOString(),
     resolvedAt: r.resolvedAt === null ? null : r.resolvedAt.toISOString(),
   }
+}
+
+export interface OrgSummary {
+  id: string
+  name: string
+  isPersonal: boolean
+  /** The caller's role in this org (owner/admin/member). */
+  role: string
+  createdAt: string
+}
+
+export function toOrgSummary(org: Organization, role: string): OrgSummary {
+  return {
+    id: org.id,
+    name: org.name,
+    isPersonal: org.isPersonal,
+    role,
+    createdAt: org.createdAt.toISOString(),
+  }
+}
+
+/** A project as shown on the org home: summary plus the at-a-glance counts the cards display. */
+export interface OrgProjectSummary extends ProjectSummary {
+  agentCount: number
+  pendingRequestCount: number
+  defaultBranch: string | null
+}
+
+export function toOrgProjectSummary(
+  p: Project,
+  extra: { agentCount: number; pendingRequestCount: number; defaultBranch: string | null },
+): OrgProjectSummary {
+  return { ...toProjectSummary(p), ...extra }
+}
+
+/** An agent in the org-wide roster: its view plus the name of its home project. */
+export interface OrgAgentView extends AgentView {
+  projectName: string
+}
+
+export function toOrgAgentView(agent: Agent, grants: readonly AgentGrant[], projectName: string): OrgAgentView {
+  return { ...toAgentView(agent, grants), projectName }
+}
+
+export interface BranchView {
+  id: string
+  name: string
+  isDefault: boolean
+  createdAt: string
+}
+
+export function toBranchView(b: Branch): BranchView {
+  return { id: b.id, name: b.name, isDefault: b.isDefault, createdAt: b.createdAt.toISOString() }
 }

@@ -6,6 +6,7 @@ import { HttpError } from './errors.ts'
 import { agentApiRoutes } from './routes/agent.ts'
 import { agentRoutes } from './routes/agents.ts'
 import { devAuthRoutes } from './routes/dev-auth.ts'
+import { organizationRoutes } from './routes/organizations.ts'
 import { projectRoutes } from './routes/projects.ts'
 import { scopeRequestRoutes } from './routes/scope-requests.ts'
 
@@ -38,6 +39,7 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
       return { error: 'internal_error', message }
     })
     .get('/health', () => ({ status: 'ok' as const }))
+    .use(organizationRoutes(ctx))
     .use(projectRoutes(ctx))
     .use(agentRoutes(ctx))
     .use(scopeRequestRoutes(ctx))

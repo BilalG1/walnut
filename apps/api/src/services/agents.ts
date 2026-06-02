@@ -8,10 +8,11 @@ import {
   parseScopes,
   syncAgentScopes,
 } from '@walnut/core'
-import { agentGrants, agents, type Agent, type AgentGrant, type GrantResourceType } from '@walnut/db'
+import { agentGrants, agents, projects, type Agent, type AgentGrant, type GrantResourceType } from '@walnut/db'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
+import { assertOrgMember } from './organizations.ts'
 import { getProject, getProjectInternal } from './projects.ts'
 
 /** An agent plus its grants — the unit the dashboard and serializers care about. */
@@ -49,6 +50,27 @@ export async function listAgents(
     rows.map((a) => a.id),
   )
   return rows.map((agent) => ({ agent, grants: grants.get(agent.id) ?? [] }))
+}
+
+/** An org-wide agent row: the agent, its grants, and the name of its home project. */
+export interface OrgAgentRow extends AgentWithGrants {
+  projectName: string
+}
+
+/** Every agent whose home project lives in the org (caller must be a member). */
+export async function listOrgAgents(ctx: AppContext, orgId: string, userId: string): Promise<OrgAgentRow[]> {
+  await assertOrgMember(ctx, orgId, userId)
+  const rows = await ctx.db
+    .select({ agent: agents, projectName: projects.name })
+    .from(agents)
+    .innerJoin(projects, eq(agents.projectId, projects.id))
+    .where(eq(projects.organizationId, orgId))
+    .orderBy(desc(agents.createdAt))
+  const grants = await grantsByAgent(
+    ctx,
+    rows.map((r) => r.agent.id),
+  )
+  return rows.map((r) => ({ agent: r.agent, grants: grants.get(r.agent.id) ?? [], projectName: r.projectName }))
 }
 
 export interface CreatedAgent extends AgentWithGrants {
