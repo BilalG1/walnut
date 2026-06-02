@@ -38,7 +38,7 @@ export async function refreshAccessToken(): Promise<string | null> {
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
     client_id: authConfig.projectId,
-    client_secret: authConfig.publishableClientKey,
+    client_secret: authConfig.oauthClientSecret,
   })
   let res: Response
   try {

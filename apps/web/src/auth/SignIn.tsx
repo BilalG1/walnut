@@ -16,7 +16,9 @@ export function SignIn() {
   const [pendingProvider, setPendingProvider] = useState<OAuthProvider | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const hasOAuth = authConfig.projectId !== '' && authConfig.publishableClientKey !== ''
+  // OAuth works without a publishable client key (config falls back to the sentinel),
+  // so a project id is all that's required to offer Google/GitHub.
+  const hasOAuth = authConfig.projectId !== ''
 
   async function onDevSubmit(event: FormEvent) {
     event.preventDefault()

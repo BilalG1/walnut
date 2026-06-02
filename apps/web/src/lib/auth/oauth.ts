@@ -41,7 +41,7 @@ export function buildAuthorizeUrl(opts: {
   const url = new URL(`${authConfig.hexclaveApiBaseUrl}/api/v1/auth/oauth/authorize/${opts.provider}`)
   const p = url.searchParams
   p.set('client_id', authConfig.projectId)
-  p.set('client_secret', authConfig.publishableClientKey)
+  p.set('client_secret', authConfig.oauthClientSecret)
   p.set('redirect_uri', opts.redirectUri)
   p.set('scope', 'legacy')
   p.set('state', opts.state)
@@ -133,7 +133,7 @@ export async function completeOAuthSignIn(): Promise<void> {
     redirect_uri: pending.redirectUri,
     code_verifier: pending.verifier,
     client_id: authConfig.projectId,
-    client_secret: authConfig.publishableClientKey,
+    client_secret: authConfig.oauthClientSecret,
   })
   const res = await fetch(`${authConfig.hexclaveApiBaseUrl}/api/v1/auth/oauth/token`, {
     method: 'POST',

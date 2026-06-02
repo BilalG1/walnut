@@ -34,6 +34,15 @@ describe('buildAuthorizeUrl', () => {
     expect(url.searchParams.get('grant_type')).toBe('authorization_code')
     expect(url.searchParams.get('hexclave_response_mode')).toBe('json')
   })
+
+  test('falls back to the public-client sentinel when no publishable key is set', () => {
+    // No VITE_HEXCLAVE_PUBLISHABLE_CLIENT_KEY in the test env, so client_secret is the
+    // sentinel the token endpoint accepts (an empty secret is rejected).
+    const url = new URL(
+      buildAuthorizeUrl({ provider: 'github', state: 's', codeChallenge: 'c', redirectUri: 'https://app/cb' }),
+    )
+    expect(url.searchParams.get('client_secret')).toBe('__stack_public_client__')
+  })
 })
 
 describe('completeOAuthSignIn', () => {
