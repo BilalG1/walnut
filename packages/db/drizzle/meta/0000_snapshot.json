@@ -1,9 +1,77 @@
 {
-  "id": "a09e9951-7373-4440-b802-fdadb68b0eef",
+  "id": "4c1e8750-f371-45a9-be4e-0924dd21e7f1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.agent_grant_scopes": {
+      "name": "agent_grant_scopes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "grant_id": {
+          "name": "grant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_grant_scopes_grant_id_agent_grants_id_fk": {
+          "name": "agent_grant_scopes_grant_id_agent_grants_id_fk",
+          "tableFrom": "agent_grant_scopes",
+          "tableTo": "agent_grants",
+          "columnsFrom": [
+            "grant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "agent_grant_scopes_grant_scope_unique": {
+          "name": "agent_grant_scopes_grant_scope_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "grant_id",
+            "scope"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.agent_grants": {
       "name": "agent_grants",
       "schema": "",
@@ -33,13 +101,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "scopes": {
-          "name": "scopes",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
         "db_role": {
           "name": "db_role",
           "type": "text",
@@ -49,6 +110,12 @@
         "connection_uri": {
           "name": "connection_uri",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "synced_scopes": {
+          "name": "synced_scopes",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -619,6 +686,12 @@
         "reason": {
           "name": "reason",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_in_seconds": {
+          "name": "expires_in_seconds",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },

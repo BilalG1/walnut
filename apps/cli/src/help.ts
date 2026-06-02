@@ -90,9 +90,12 @@ USAGE
   walnut scope request <scope...>       Request scopes (e.g. db:read db:write).
                                         --reason "<text>" to explain why.
                                         --project <id> to target a specific project.
+                                        --ttl <dur> to time-box once approved
+                                        (90s, 30m, 1h, 7d, or seconds; default permanent).
 
 EXAMPLES
   walnut scope ls
   walnut scope request db:read db:write --reason "seed the database"
+  walnut scope request db:write --ttl 1h --reason "one-off migration"
   walnut scope request db:read --project <id>`
 }

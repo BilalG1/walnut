@@ -84,20 +84,23 @@ export async function scopeLs(client: ApiClient, pretty: boolean): Promise<CliRe
 }
 
 /** `scope request <scope...>` → POST /agent/v1/scope-requests. With `--project` the request
- * targets that project; without it the server defaults to the agent's sole project. */
+ * targets that project; without it the server defaults to the agent's sole project. With
+ * `--ttl` the scopes are time-boxed to that many seconds once approved (else permanent). */
 export async function scopeRequest(
   client: ApiClient,
   scopes: string[],
   reason: string | undefined,
   projectId: string | undefined,
+  expiresInSeconds: number | undefined,
   pretty: boolean,
 ): Promise<CliResult> {
   try {
-    const withReason = reason === undefined ? { scopes } : { scopes, reason }
-    const body =
-      projectId === undefined
-        ? withReason
-        : { ...withReason, resourceType: 'project' as const, resourceId: projectId }
+    const body = {
+      scopes,
+      ...(reason === undefined ? {} : { reason }),
+      ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+      ...(projectId === undefined ? {} : { resourceType: 'project' as const, resourceId: projectId }),
+    }
     const res = await client.agent.v1['scope-requests'].post(body)
     return respond(res, pretty)
   } catch (err) {

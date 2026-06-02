@@ -92,9 +92,16 @@ async function assertResourceInOrg(
   }
 }
 
+/** A year in seconds — the ceiling we accept for a requested time-box (a sane upper bound
+ * so a typo can't grant near-permanent bounded access; permanent is requested as `null`). */
+const MAX_TTL_SECONDS = 365 * 24 * 60 * 60
+
 export interface ScopeRequestInput {
   scopes: string[]
   reason?: string
+  /** Optional time-box: how long (seconds) the scopes should last once approved. Omit for
+   * permanent. The clock starts at approval, so this is a duration, not a deadline. */
+  expiresInSeconds?: number
   /** Target resource. Both must be supplied together; omit to default to the agent's sole
    * project — its single granted project, or the org's sole project if it has none yet
    * (it errors if there are zero or several to choose from). */
@@ -124,6 +131,11 @@ export async function createScopeRequest(ctx: AppContext, agent: Agent, input: S
     throw badRequest(err instanceof Error ? err.message : 'Invalid scopes.')
   }
 
+  const ttl = input.expiresInSeconds
+  if (ttl !== undefined && (!Number.isInteger(ttl) || ttl <= 0 || ttl > MAX_TTL_SECONDS)) {
+    throw badRequest(`expiresInSeconds must be a positive integer no greater than ${MAX_TTL_SECONDS} (one year).`)
+  }
+
   const [created] = await ctx.db
     .insert(scopeRequests)
     .values({
@@ -133,6 +145,7 @@ export async function createScopeRequest(ctx: AppContext, agent: Agent, input: S
       resourceId,
       scopes,
       reason: input.reason ?? null,
+      expiresInSeconds: ttl ?? null,
       status: 'pending',
     })
     .returning()
@@ -174,9 +187,18 @@ export async function resolveScopeRequest(
   }
 
   if (decision === 'approved') {
-    // Merge the requested scopes into the agent's grant for the anchored resource and
-    // sync its Postgres role memberships (provisioning the grant/role if it's the first).
-    await grantScopes(ctx, request.agentId, request.resourceType, request.resourceId, request.scopes)
+    // Merge the requested scopes into the agent's grant for the anchored resource — a pure
+    // metadata write. The requested time-box (if any) becomes a concrete deadline now, when
+    // access begins; the Postgres role is reconciled lazily on the agent's next query.
+    const expiresAt =
+      request.expiresInSeconds === null ? null : new Date(Date.now() + request.expiresInSeconds * 1000)
+    await grantScopes(
+      ctx,
+      request.agentId,
+      request.resourceType,
+      request.resourceId,
+      request.scopes.map((scope) => ({ scope, expiresAt })),
+    )
   }
 
   const [updated] = await ctx.db

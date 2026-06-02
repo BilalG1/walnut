@@ -55,3 +55,32 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   const days = Math.round(hours / 24)
   return `${days}d ago`
 }
+
+/** Compact, human duration from a number of seconds, e.g. `90` -> `90s`, `3600` -> `1h`,
+ * `604800` -> `7d`. Used to render a scope request's requested time-box. */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)}m`
+  }
+  if (seconds < 86400) {
+    return `${Math.round(seconds / 3600)}h`
+  }
+  return `${Math.round(seconds / 86400)}d`
+}
+
+/** Short label for when a scope lapses, e.g. `expires in 59m`, or `expired` once past.
+ * Returns null for a permanent (null) expiry, so callers render nothing. */
+export function expiresLabel(iso: string | null, now: number = Date.now()): string | null {
+  if (iso === null) {
+    return null
+  }
+  const at = new Date(iso).getTime()
+  if (Number.isNaN(at)) {
+    return null
+  }
+  const remaining = Math.round((at - now) / 1000)
+  return remaining <= 0 ? 'expired' : `expires in ${formatDuration(remaining)}`
+}

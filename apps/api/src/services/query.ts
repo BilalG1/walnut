@@ -1,16 +1,19 @@
-import { type AgentScope, classifySql, missingScopes, type QueryResult, runSql, SCOPE_DESCRIPTIONS } from '@walnut/core'
+import {
+  classifySql,
+  effectiveScopes,
+  missingScopes,
+  type QueryResult,
+  runSql,
+  sameScopeSet,
+  SCOPE_DESCRIPTIONS,
+} from '@walnut/core'
 import type { Project } from '@walnut/db'
+import type { AppContext } from '../context.ts'
 import { HttpError } from '../errors.ts'
+import { ensureGrantSynced, type GrantWithScopes } from './agents.ts'
 
 export interface AgentQueryResult extends QueryResult {
   requiredScopes: string[]
-}
-
-/** An agent's effective access to a target database: the scopes it holds there and the
- * restricted connection its queries run over (null falls back to the owner connection). */
-export interface AgentAccess {
-  scopes: readonly AgentScope[]
-  connectionUri: string | null
 }
 
 /**
@@ -18,8 +21,20 @@ export interface AgentAccess {
  * first. A missing scope yields a clear, machine-readable 403 telling the agent
  * exactly what it lacks and how to ask for it — the heart of the agent-first
  * contract.
+ *
+ * Scopes come from the metadata DB (the source of truth), expiry-filtered to those still
+ * in force. The agent's Postgres role is reconciled to those effective scopes
+ * ({@link ensureGrantSynced}) and the query runs over its restricted connection — never the
+ * project owner connection — so the engine backs up the classifier (defense in depth). The
+ * reconcile also runs on the *denied* path whenever a provisioned role's memberships have
+ * drifted (e.g. a scope lapsed), so engine revocation never trails the source of truth.
  */
-export async function runAgentQuery(project: Project, access: AgentAccess, sql: string): Promise<AgentQueryResult> {
+export async function runAgentQuery(
+  ctx: AppContext,
+  project: Project,
+  grant: GrantWithScopes | null,
+  sql: string,
+): Promise<AgentQueryResult> {
   if (project.status !== 'active' || project.connectionUri === null) {
     throw new HttpError(409, {
       error: 'project_not_ready',
@@ -32,8 +47,17 @@ export async function runAgentQuery(project: Project, access: AgentAccess, sql: 
     throw new HttpError(400, { error: 'empty_query', message: 'SQL statement is empty.' })
   }
 
-  const missing = missingScopes(access.scopes, classification.requiredScopes)
+  const now = new Date()
+  const granted = grant === null ? [] : effectiveScopes(grant.scopes, now)
+  const missing = missingScopes(granted, classification.requiredScopes)
   if (missing.length > 0) {
+    // Denied — but if a provisioned role still carries memberships that have since lapsed,
+    // revoke them now rather than deferring to the next authorised query. Bounded: this only
+    // does role DDL when the synced snapshot has actually drifted (e.g. a scope just
+    // expired), after which the snapshot matches and repeat denials are a no-op.
+    if (grant !== null && grant.dbRole !== null && !sameScopeSet(grant.syncedScopes, granted)) {
+      await ensureGrantSynced(ctx, grant, project.connectionUri, now)
+    }
     throw new HttpError(403, {
       error: 'insufficient_scope',
       message:
@@ -42,16 +66,23 @@ export async function runAgentQuery(project: Project, access: AgentAccess, sql: 
         '(POST /agent/v1/scope-requests).',
       requiredScopes: classification.requiredScopes,
       missingScopes: missing,
-      grantedScopes: access.scopes,
+      grantedScopes: granted,
       scopeDetails: missing.map((s) => ({ scope: s, description: SCOPE_DESCRIPTIONS[s] })),
       howToRequest: 'POST /agent/v1/scope-requests with body { "scopes": [...], "reason": "..." }',
     })
   }
 
-  // Run over the agent's own restricted role (defense in depth: the database engine
-  // backs up the classifier). Fall back to the owner connection only if the agent
-  // somehow has no scoped connection for this resource.
-  const connectionUri = access.connectionUri ?? project.connectionUri
+  // Authorised by the metadata DB. `grant` is necessarily non-null here (an empty grant
+  // yields no effective scopes, which can't satisfy a real statement's required scopes).
+  // Reconcile the engine to the effective scopes (provisioning the role lazily on first use).
+  if (grant === null) {
+    throw new HttpError(500, { error: 'internal_error', message: 'Authorised query unexpectedly has no grant.' })
+  }
+  const { connectionUri } = await ensureGrantSynced(ctx, grant, project.connectionUri, now)
+  if (connectionUri === null) {
+    // Fail closed: a scoped query must never fall back to the owner (superuser) connection.
+    throw new HttpError(500, { error: 'internal_error', message: 'No scoped connection provisioned for grant.' })
+  }
 
   let result: QueryResult
   try {

@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
 import { SYSTEM_USER_ID } from '@walnut/core'
-import { agentGrants, branches, organizationMembers, organizations } from '@walnut/db'
-import { eq } from 'drizzle-orm'
+import { agentGrants, agentGrantScopes, branches, organizationMembers, organizations } from '@walnut/db'
+import { and, eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
 import { createApp } from '../src/app.ts'
 import type { HexclaveServerClient } from '../src/auth/hexclave-server.ts'
@@ -139,18 +139,31 @@ describe('agents', () => {
     expect(grants.length).toBe(0)
   })
 
-  test('approving the first scope request creates the grant + scoped role', async () => {
+  test('approving a scope request is a pure metadata write; the role is provisioned lazily on first query', async () => {
     const project = await newProject()
     const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
+
+    // Approval writes the grant + scope rows but touches no Postgres role yet.
     const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
     expect(grants.length).toBe(1)
     const g = grants[0]
     expect(g?.resourceType).toBe('project')
     expect(g?.resourceId).toBe(project.id)
-    expect(g?.scopes).toEqual(['db:read', 'db:write'])
-    expect(typeof g?.dbRole).toBe('string')
-    expect(g?.connectionUri ?? '').toContain('postgres')
+    expect(g?.dbRole).toBeNull()
+    expect(g?.connectionUri).toBeNull()
+    expect(g?.syncedScopes).toBeNull()
+    const scopeRows = await h.ctx.db.select().from(agentGrantScopes).where(eq(agentGrantScopes.grantId, g?.id ?? ''))
+    expect(scopeRows.map((r) => r.scope).toSorted()).toEqual(['db:read', 'db:write'])
+    expect(scopeRows.every((r) => r.expiresAt === null)).toBe(true)
+
+    // The first query provisions the role lazily and records the synced snapshot.
+    const ran = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: bearer(agent.apiKey) })
+    expect(ran.status).toBe(200)
+    const [after] = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.id, g?.id ?? ''))
+    expect(typeof after?.dbRole).toBe('string')
+    expect(after?.connectionUri ?? '').toContain('postgres')
+    expect(after?.syncedScopes).toEqual(['db:read', 'db:write'])
   }, 20_000)
 })
 
@@ -348,6 +361,171 @@ describe('database-level role enforcement', () => {
     )
     expect(read.status).toBe(200)
     expect(read.data?.rows).toEqual([{ id: 42 }])
+  })
+})
+
+describe('scope expiry', () => {
+  /** Request scopes with a TTL and approve them; returns the grant row id. */
+  async function grantWithTtl(
+    apiKey: string,
+    projectId: string,
+    scopes: ('db:read' | 'db:write' | 'db:delete' | 'db:ddl')[],
+    expiresInSeconds: number,
+  ): Promise<void> {
+    const reqRes = await h.api.agent.v1['scope-requests'].post(
+      { scopes, expiresInSeconds, resourceType: 'project', resourceId: projectId },
+      { headers: bearer(apiKey) },
+    )
+    const id = reqRes.data?.id
+    if (id === undefined) throw new Error(`ttl scope request failed: ${JSON.stringify(reqRes.error?.value)}`)
+    expect(reqRes.data?.expiresInSeconds).toBe(expiresInSeconds)
+    await h.api.api['scope-requests']({ id }).approve.post()
+  }
+
+  /** Force a scope's deadline into the past so the next reconcile treats it as expired. */
+  async function expireScope(
+    agentId: string,
+    projectId: string,
+    scope: 'db:read' | 'db:write' | 'db:delete' | 'db:ddl',
+  ): Promise<void> {
+    const [g] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(and(eq(agentGrants.agentId, agentId), eq(agentGrants.resourceId, projectId)))
+    await h.ctx.db
+      .update(agentGrantScopes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(and(eq(agentGrantScopes.grantId, g?.id ?? ''), eq(agentGrantScopes.scope, scope)))
+  }
+
+  test('a time-boxed scope works while valid and carries its expiry in the roster', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    await grantWithTtl(agent.apiKey, project.id, ['db:read'], 3600)
+
+    // The scope is usable while in force.
+    const ran = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: bearer(agent.apiKey) })
+    expect(ran.status).toBe(200)
+
+    // The scope row carries a concrete deadline ~1h out (the approval-time clock).
+    const [g] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
+    const [scopeRow] = await h.ctx.db
+      .select()
+      .from(agentGrantScopes)
+      .where(and(eq(agentGrantScopes.grantId, g?.id ?? ''), eq(agentGrantScopes.scope, 'db:read')))
+    const remainingMs = (scopeRow?.expiresAt?.getTime() ?? 0) - Date.now()
+    expect(remainingMs).toBeGreaterThan(3000_000)
+    expect(remainingMs).toBeLessThanOrEqual(3600_000)
+
+    // The org roster surfaces the per-scope expiry (non-null deadline) on the grant.
+    const orgId = await personalOrgId()
+    const roster = await h.api.api.organizations({ orgId }).agents.get()
+    const row = roster.data?.find((a) => a.id === agent.id)
+    const grantView = row?.grants.find((gr) => gr.resourceId === project.id)
+    const readScope = grantView?.scopes.find((s) => s.scope === 'db:read')
+    expect(readScope).toBeDefined()
+    expect(readScope?.expiresAt).not.toBeNull()
+  }, 20_000)
+
+  test('an expired scope is denied at the classifier and revoked from the role on the next valid query', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    const auth = bearer(agent.apiKey)
+    // Permanent read + a time-boxed write; a first query provisions the scoped role.
+    await grant(agent.apiKey, project.id, ['db:read'])
+    await grantWithTtl(agent.apiKey, project.id, ['db:write'], 3600)
+    const seed = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: auth })
+    expect(seed.status).toBe(200)
+
+    // Time passes: the write scope lapses.
+    await expireScope(agent.id, project.id, 'db:write')
+
+    // The classifier now refuses a write (effective scopes no longer include db:write).
+    // The table need not exist — the missing-scope check runs before any execution.
+    const blocked = await h.api.agent.v1.query.post(
+      { sql: 'INSERT INTO some_table VALUES (1)' },
+      { headers: auth },
+    )
+    expect(blocked.status).toBe(403)
+    expect((blocked.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['db:write'])
+
+    // A still-valid read reconciles the role: the expired write membership is revoked,
+    // leaving the synced snapshot at just db:read.
+    const read = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: auth })
+    expect(read.status).toBe(200)
+    const [g] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
+    expect(g?.syncedScopes).toEqual(['db:read'])
+
+    // The agent's identity also reflects only the live scope.
+    const identity = await h.api.agent.v1.identity.get({ headers: auth })
+    expect(identity.data?.scopes).toEqual(['db:read'])
+  }, 25_000)
+
+  test('when every scope lapses, even a denied query revokes the stale role memberships', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    const auth = bearer(agent.apiKey)
+    // A single time-boxed scope, provisioned onto the role by an authorised query.
+    await grantWithTtl(agent.apiKey, project.id, ['db:read'], 3600)
+    const seed = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: auth })
+    expect(seed.status).toBe(200)
+    const [before] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
+    expect(before?.syncedScopes).toEqual(['db:read'])
+
+    // The scope lapses, leaving the grant with zero effective scopes.
+    await expireScope(agent.id, project.id, 'db:read')
+
+    // The next query is denied (nothing is in force) — but the engine cache must not be left
+    // stale: the reconcile on the denied path revokes the lapsed db:read membership.
+    const blocked = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: auth })
+    expect(blocked.status).toBe(403)
+    const [after] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
+    expect(after?.syncedScopes).toEqual([])
+  }, 20_000)
+
+  test('re-requesting a scope extends its expiry (the later deadline wins)', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    await grantWithTtl(agent.apiKey, project.id, ['db:read'], 60)
+    await grantWithTtl(agent.apiKey, project.id, ['db:read'], 7200)
+    const [g] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
+    const [scopeRow] = await h.ctx.db
+      .select()
+      .from(agentGrantScopes)
+      .where(and(eq(agentGrantScopes.grantId, g?.id ?? ''), eq(agentGrantScopes.scope, 'db:read')))
+    // The 2h deadline beats the 1m one — never shortened.
+    const remainingMs = (scopeRow?.expiresAt?.getTime() ?? 0) - Date.now()
+    expect(remainingMs).toBeGreaterThan(3600_000)
+  })
+
+  test('a non-positive or oversized TTL is rejected', async () => {
+    await newProject()
+    const agent = await newAgent()
+    const zero = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:read'], expiresInSeconds: 0 },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(zero.status).not.toBe(200)
+    const huge = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:read'], expiresInSeconds: 999_999_999 },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(huge.status).toBe(400)
   })
 })
 

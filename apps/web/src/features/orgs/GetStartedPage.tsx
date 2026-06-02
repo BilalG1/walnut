@@ -5,6 +5,7 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { useCreateAgent, useCreateProject, useOrgRequests, useResolveRequest } from '../../data/queries.ts'
 import { saveAgentKey } from '../../lib/agentKeys.ts'
+import { formatDuration } from '../../lib/format.ts'
 
 /** Guided first-run flow: create a project, connect an agent via the CLI, then watch the
  * agent's first scope request arrive and approve it. Org-scoped — a project doesn't exist
@@ -357,6 +358,9 @@ function GetStartedView({ orgId }: { orgId: string }) {
                                     {s}
                                   </Badge>
                                 ))}
+                                {incoming.expiresInSeconds !== null ? (
+                                  <Badge tone="neutral">for {formatDuration(incoming.expiresInSeconds)}</Badge>
+                                ) : null}
                               </div>
                               {resolve.error !== null ? (
                                 <p className="mt-2 text-xs text-danger">{resolve.error.message}</p>

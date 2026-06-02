@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import {
   ALL_SCOPES,
+  effectiveScopes,
   isAgentScope,
   isScopeValidForResource,
   missingScopes,
   parseScopes,
   parseScopesForResource,
+  sameScopeSet,
   SCOPES_BY_RESOURCE,
 } from '../src/scopes.ts'
 
@@ -30,6 +32,48 @@ describe('scopes', () => {
     expect(missingScopes(['db:read'], ['db:read', 'db:write'])).toEqual(['db:write'])
     expect(missingScopes([], ['db:ddl', 'db:read'])).toEqual(['db:read', 'db:ddl'])
     expect(missingScopes(['db:read', 'db:write'], ['db:read'])).toEqual([])
+  })
+})
+
+describe('scope expiry', () => {
+  const now = new Date('2026-06-02T12:00:00Z')
+  const past = new Date(now.getTime() - 1000)
+  const future = new Date(now.getTime() + 3600_000)
+
+  test('effectiveScopes keeps permanent and not-yet-expired scopes, drops expired', () => {
+    expect(
+      effectiveScopes(
+        [
+          { scope: 'db:read', expiresAt: null },
+          { scope: 'db:write', expiresAt: future },
+          { scope: 'db:delete', expiresAt: past },
+        ],
+        now,
+      ),
+    ).toEqual(['db:read', 'db:write'])
+  })
+
+  test('effectiveScopes returns display order regardless of input order, deduped', () => {
+    expect(
+      effectiveScopes(
+        [
+          { scope: 'db:ddl', expiresAt: null },
+          { scope: 'db:read', expiresAt: future },
+        ],
+        now,
+      ),
+    ).toEqual(['db:read', 'db:ddl'])
+  })
+
+  test('a scope exactly at its deadline is expired (strictly-future check)', () => {
+    expect(effectiveScopes([{ scope: 'db:read', expiresAt: now }], now)).toEqual([])
+  })
+
+  test('sameScopeSet compares canonical lists; null snapshot never matches', () => {
+    expect(sameScopeSet(['db:read', 'db:write'], ['db:read', 'db:write'])).toBe(true)
+    expect(sameScopeSet(['db:read'], ['db:read', 'db:write'])).toBe(false)
+    expect(sameScopeSet(null, [])).toBe(false)
+    expect(sameScopeSet([], [])).toBe(true)
   })
 })
 

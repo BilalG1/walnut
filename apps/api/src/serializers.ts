@@ -1,5 +1,9 @@
-import { parseScopes } from '@walnut/core'
+import { type AgentScope, effectiveScopes, type ScopeWithExpiry } from '@walnut/core'
 import type { Agent, AgentGrant, Branch, Organization, Project, QueryEvent, ScopeRequest } from '@walnut/db'
+
+/** A grant with its scope rows (each carrying an optional expiry) — what the serializers
+ * receive from the services. */
+type GrantWithScopes = AgentGrant & { scopes: ScopeWithExpiry[] }
 
 export interface ProjectSummary {
   id: string
@@ -36,6 +40,8 @@ export interface ScopeRequestView {
   resourceId: string
   scopes: string[]
   reason: string | null
+  /** Requested time-box in seconds (null = permanent). */
+  expiresInSeconds: number | null
   status: string
   createdAt: string
   resolvedAt: string | null
@@ -57,18 +63,19 @@ export function toProjectDetail(p: Project): ProjectDetail {
   return { ...toProjectSummary(p), connectionUri: p.connectionUri }
 }
 
-/** An agent's effective scopes: the deduplicated union across all its grants. */
-export function effectiveScopes(grants: readonly AgentGrant[]): string[] {
-  return parseScopes(grants.flatMap((g) => g.scopes))
+/** An agent's effective scopes: the deduplicated union of its non-expired scopes across
+ * all grants. Expired scopes drop out, so the dashboard shows live access. */
+export function agentScopeUnion(grants: readonly GrantWithScopes[], now: Date = new Date()): AgentScope[] {
+  return effectiveScopes(grants.flatMap((g) => g.scopes), now)
 }
 
-export function toAgentView(agent: Agent, grants: readonly AgentGrant[]): AgentView {
+export function toAgentView(agent: Agent, grants: readonly GrantWithScopes[]): AgentView {
   return {
     id: agent.id,
     organizationId: agent.organizationId,
     name: agent.name,
     keyPrefix: agent.keyPrefix,
-    scopes: effectiveScopes(grants),
+    scopes: agentScopeUnion(grants),
     createdAt: agent.createdAt.toISOString(),
   }
 }
@@ -82,6 +89,7 @@ export function toScopeRequestView(r: ScopeRequest): ScopeRequestView {
     resourceId: r.resourceId,
     scopes: r.scopes,
     reason: r.reason,
+    expiresInSeconds: r.expiresInSeconds,
     status: r.status,
     createdAt: r.createdAt.toISOString(),
     resolvedAt: r.resolvedAt === null ? null : r.resolvedAt.toISOString(),
@@ -121,13 +129,21 @@ export function toOrgProjectSummary(
   return { ...toProjectSummary(p), ...extra }
 }
 
+/** One scope held on a grant, as shown in the org roster: the scope and when it lapses
+ * (`expiresAt` null = permanent). */
+export interface ScopeGrantView {
+  scope: string
+  expiresAt: string | null
+}
+
 /** One of an agent's grants, as shown in the org roster: the resource it applies to (with
- * a resolved project name when known) and the scopes held there. */
+ * a resolved project name when known) and the live (non-expired) scopes held there, each
+ * with its expiry. */
 export interface OrgAgentGrantView {
   resourceType: string
   resourceId: string
   projectName: string | null
-  scopes: string[]
+  scopes: ScopeGrantView[]
 }
 
 /** An agent in the org-wide roster: its view plus a per-resource breakdown of its access
@@ -138,16 +154,20 @@ export interface OrgAgentView extends AgentView {
 
 export function toOrgAgentView(
   agent: Agent,
-  grants: readonly AgentGrant[],
+  grants: readonly GrantWithScopes[],
   projectNames: Readonly<Record<string, string>>,
+  now: Date = new Date(),
 ): OrgAgentView {
+  const isLive = (s: ScopeWithExpiry): boolean => s.expiresAt === null || s.expiresAt.getTime() > now.getTime()
   return {
     ...toAgentView(agent, grants),
     grants: grants.map((g) => ({
       resourceType: g.resourceType,
       resourceId: g.resourceId,
       projectName: projectNames[g.resourceId] ?? null,
-      scopes: g.scopes,
+      scopes: g.scopes
+        .filter(isLive)
+        .map((s) => ({ scope: s.scope, expiresAt: s.expiresAt === null ? null : s.expiresAt.toISOString() })),
     })),
   }
 }

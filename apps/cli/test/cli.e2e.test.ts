@@ -198,6 +198,20 @@ describe('scope', () => {
     expect(out.resourceType).toBe('project')
     expect(out.resourceId).toBe(projectId)
   })
+
+  test('scope request --ttl time-boxes the request', async () => {
+    const { key } = await h.makeAgent()
+    const r = await h.run(['scope', 'request', 'db:write', '--ttl', '1h'], { key })
+    expect(r.code).toBe(0)
+    expect(parse(r.stdout).expiresInSeconds).toBe(3600)
+  })
+
+  test('scope request --ttl rejects a malformed duration (exit 2)', async () => {
+    const { key } = await h.makeAgent()
+    const r = await h.run(['scope', 'request', 'db:write', '--ttl', 'soon'], { key })
+    expect(r.code).toBe(2)
+    expect(parse(r.stderr).error).toBe('usage')
+  })
 })
 
 // The real from-source binary, for paths that never touch the network — this proves

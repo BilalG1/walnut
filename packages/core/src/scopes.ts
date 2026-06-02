@@ -92,3 +92,36 @@ export function missingScopes(held: readonly AgentScope[], required: readonly Ag
   const heldSet = new Set(held)
   return ALL_SCOPES.filter((s) => required.includes(s) && !heldSet.has(s))
 }
+
+/** A scope an agent holds, with its optional expiry (`null` = permanent). The unit of
+ * a grant that carries time — see `effectiveScopes`. */
+export interface ScopeWithExpiry {
+  scope: AgentScope
+  expiresAt: Date | null
+}
+
+/**
+ * The scopes that are *currently in force* given each one's expiry — permanent scopes
+ * (`expiresAt === null`) and those whose deadline is still in the future — deduplicated
+ * and in display order. An expired scope simply isn't returned, so callers (the
+ * classifier check, role sync, identity) all see access lapse without any separate
+ * revoke step. `now` is injectable for deterministic tests.
+ */
+export function effectiveScopes(entries: readonly ScopeWithExpiry[], now: Date = new Date()): AgentScope[] {
+  const live = new Set<string>()
+  for (const e of entries) {
+    if (e.expiresAt === null || e.expiresAt.getTime() > now.getTime()) {
+      live.add(e.scope)
+    }
+  }
+  return ALL_SCOPES.filter((s) => live.has(s))
+}
+
+/** Whether two scope lists are equal as canonical (display-ordered) sets. Used to
+ * compare a grant's `syncedScopes` snapshot against its current effective scopes. */
+export function sameScopeSet(a: readonly AgentScope[] | null, b: readonly AgentScope[]): boolean {
+  if (a === null || a.length !== b.length) {
+    return false
+  }
+  return a.every((s, i) => s === b[i])
+}

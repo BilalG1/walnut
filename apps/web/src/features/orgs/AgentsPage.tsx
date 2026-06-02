@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useOrgAgents } from '../../data/queries.ts'
-import { scopeLabel, timeAgo } from '../../lib/format.ts'
+import { expiresLabel, scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
 import { CreateAgentDialog } from './CreateAgentDialog.tsx'
 
@@ -81,11 +81,17 @@ function AgentsView({ orgId }: { orgId: string }) {
                                 {g.scopes.length === 0 ? (
                                   <span className="text-xs text-faint">no scopes</span>
                                 ) : (
-                                  g.scopes.map((s) => (
-                                    <Badge key={s} tone={scopeTone(s)} mono>
-                                      {scopeLabel(s)}
-                                    </Badge>
-                                  ))
+                                  g.scopes.map((s) => {
+                                    const expiry = expiresLabel(s.expiresAt)
+                                    return (
+                                      <Badge key={s.scope} tone={scopeTone(s.scope)} mono>
+                                        {scopeLabel(s.scope)}
+                                        {expiry !== null ? (
+                                          <span className="ml-1 font-sans text-[10px] opacity-70">{expiry}</span>
+                                        ) : null}
+                                      </Badge>
+                                    )
+                                  })
                                 )}
                               </div>
                             ))}

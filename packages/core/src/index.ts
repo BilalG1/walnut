@@ -9,8 +9,10 @@ export {
   parseScopes,
   parseScopesForResource,
   missingScopes,
+  effectiveScopes,
+  sameScopeSet,
 } from './scopes.ts'
-export type { AgentScope, DbScope, GrantResourceType } from './scopes.ts'
+export type { AgentScope, DbScope, GrantResourceType, ScopeWithExpiry } from './scopes.ts'
 
 export { classifySql } from './sql.ts'
 export type { SqlClassification } from './sql.ts'

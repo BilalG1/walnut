@@ -127,15 +127,44 @@ export const agentGrants = pgTable(
      * branch id). No FK: the reference is polymorphic, so cascade cleanup rides on
      * `agent_id` instead. */
     resourceId: uuid('resource_id').notNull(),
-    scopes: jsonb('scopes').$type<AgentScope[]>().notNull().default([]),
-    /** The agent's restricted Postgres role for this resource's database. */
+    /** The agent's restricted Postgres role for this resource's database, and the
+     * connection scoped to it. Both null until the agent's *first query* on the
+     * resource provisions the role lazily — approval is a pure metadata write. */
     dbRole: text('db_role'),
-    /** Connection string scoped to that role; the agent's queries run over this,
-     * never the project owner connection. */
     connectionUri: text('connection_uri'),
+    /** Advisory snapshot of the scopes we last pushed to the Postgres role (the
+     * "reconcile-on-read" fast-path key). The metadata DB — `agent_grant_scopes`,
+     * expiry-filtered — is the source of truth; the Postgres role is a cache we
+     * reconcile before each query. When this matches the grant's current effective
+     * scopes we skip the role DDL entirely. Null until the first sync. Never trusted
+     * for authorization, only to avoid redundant syncs. */
+    syncedScopes: jsonb('synced_scopes').$type<AgentScope[]>(),
     createdAt,
   },
   (t) => [unique('agent_grants_agent_resource_unique').on(t.agentId, t.resourceType, t.resourceId)],
+)
+
+/**
+ * One scope an agent holds on a grant, with an optional expiry. A scope row is the
+ * unit that carries time — `expiresAt` null means permanent; a future timestamp means
+ * the scope lapses then (enforced by re-syncing the Postgres role on the next query,
+ * since role memberships don't expire on their own). Split out from `agent_grants` so
+ * the per-resource role/connection (one row) stays single-instance while scopes (many,
+ * each with its own expiry) hang off it.
+ */
+export const agentGrantScopes = pgTable(
+  'agent_grant_scopes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    grantId: uuid('grant_id')
+      .notNull()
+      .references(() => agentGrants.id, { onDelete: 'cascade' }),
+    scope: text('scope').$type<AgentScope>().notNull(),
+    /** When this scope lapses; null = permanent. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt,
+  },
+  (t) => [unique('agent_grant_scopes_grant_scope_unique').on(t.grantId, t.scope)],
 )
 
 export const scopeRequests = pgTable('scope_requests', {
@@ -155,6 +184,10 @@ export const scopeRequests = pgTable('scope_requests', {
   resourceId: uuid('resource_id').notNull(),
   scopes: jsonb('scopes').$type<AgentScope[]>().notNull(),
   reason: text('reason'),
+  /** Optional time-box the agent asked for: how long (in seconds) the granted scopes
+   * should last once approved. Null = permanent. The clock starts at *approval* (when
+   * access actually begins), so this is a duration, not an absolute deadline. */
+  expiresInSeconds: integer('expires_in_seconds'),
   status: text('status').$type<ScopeRequestStatus>().notNull().default('pending'),
   createdAt,
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
@@ -199,6 +232,8 @@ export type Agent = typeof agents.$inferSelect
 export type NewAgent = typeof agents.$inferInsert
 export type AgentGrant = typeof agentGrants.$inferSelect
 export type NewAgentGrant = typeof agentGrants.$inferInsert
+export type AgentGrantScope = typeof agentGrantScopes.$inferSelect
+export type NewAgentGrantScope = typeof agentGrantScopes.$inferInsert
 export type ScopeRequest = typeof scopeRequests.$inferSelect
 export type NewScopeRequest = typeof scopeRequests.$inferInsert
 export type QueryEvent = typeof queryEvents.$inferSelect

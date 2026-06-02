@@ -13,6 +13,22 @@ function flag(options: Record<string, string | boolean>, name: string): string |
   return typeof value === 'string' ? value : undefined
 }
 
+const DURATION_UNITS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 }
+
+/** Parse a `--ttl` duration into whole seconds. Accepts a unit suffix (`90s`, `30m`,
+ * `1h`, `7d`) or a bare integer count of seconds. Returns null on anything malformed
+ * or non-positive so the caller can surface a usage error. */
+function parseDuration(input: string): number | null {
+  const match = /^(\d+)([smhd]?)$/.exec(input.trim())
+  if (match === null) {
+    return null
+  }
+  const amount = Number(match[1])
+  const unit = match[2] ?? ''
+  const seconds = amount * (unit === '' ? 1 : (DURATION_UNITS[unit] ?? 1))
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : null
+}
+
 /** Injected so the dispatcher stays testable without touching the real process or
  * network. `homeDir` locates the credentials file; tests point it at a temp dir.
  * Tests also pass an in-memory `makeClient` (the sandbox firewall intercepts real
@@ -120,7 +136,18 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
         }
         const reason = flag(parsed.options, 'reason')
         const projectId = flag(parsed.options, 'project')
-        return withClient(io, parsed.options, pretty, (client) => scopeRequest(client, rest, reason, projectId, pretty))
+        const ttlRaw = flag(parsed.options, 'ttl')
+        let expiresInSeconds: number | undefined
+        if (ttlRaw !== undefined) {
+          const parsedTtl = parseDuration(ttlRaw)
+          if (parsedTtl === null) {
+            return fail(EXIT.USAGE, 'usage', `Invalid --ttl "${ttlRaw}". Use e.g. 90s, 30m, 1h, 7d, or a number of seconds.`, pretty)
+          }
+          expiresInSeconds = parsedTtl
+        }
+        return withClient(io, parsed.options, pretty, (client) =>
+          scopeRequest(client, rest, reason, projectId, expiresInSeconds, pretty),
+        )
       }
       return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)
     }

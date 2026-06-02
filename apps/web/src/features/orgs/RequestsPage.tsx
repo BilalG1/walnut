@@ -2,7 +2,7 @@ import { Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useOrgAgents, useOrgProjects, useOrgRequests, useResolveRequest } from '../../data/queries.ts'
-import { resourceTargetLabel, scopeLabel, timeAgo } from '../../lib/format.ts'
+import { formatDuration, resourceTargetLabel, scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
 
 const HIGH_IMPACT = new Set(['db:delete', 'db:ddl'])
@@ -55,6 +55,9 @@ function RequestsView({ orgId }: { orgId: string }) {
                   <span className="text-fg-secondary">
                     {resourceTargetLabel(r.resourceType, projectById.get(r.resourceId) ?? null)}
                   </span>
+                  {r.expiresInSeconds !== null ? (
+                    <Badge tone="neutral">for {formatDuration(r.expiresInSeconds)}</Badge>
+                  ) : null}
                   <span className="ml-auto text-xs text-subtle">{timeAgo(r.createdAt)}</span>
                 </div>
                 {r.reason !== null ? <p className="mt-1.5 text-sm text-fg-secondary">&ldquo;{r.reason}&rdquo;</p> : null}

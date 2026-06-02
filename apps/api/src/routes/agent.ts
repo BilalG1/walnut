@@ -56,11 +56,7 @@ export function agentApiRoutes(ctx: AppContext) {
         const grant = await getAgentGrant(ctx, agent.id, 'project', project.id)
         const startedAt = Date.now()
         try {
-          const result = await runAgentQuery(
-            project,
-            { scopes: grant?.scopes ?? [], connectionUri: grant?.connectionUri ?? null },
-            body.sql,
-          )
+          const result = await runAgentQuery(ctx, project, grant ?? null, body.sql)
           await recordQueryEvent(ctx, {
             agentId: agent.id,
             projectId: project.id,
@@ -104,6 +100,7 @@ export function agentApiRoutes(ctx: AppContext) {
         const created = await createScopeRequest(ctx, agent, {
           scopes: body.scopes,
           reason: body.reason,
+          expiresInSeconds: body.expiresInSeconds,
           resourceType: body.resourceType,
           resourceId: body.resourceId,
         })
@@ -113,6 +110,8 @@ export function agentApiRoutes(ctx: AppContext) {
         body: t.Object({
           scopes: t.Array(t.String(), { minItems: 1 }),
           reason: t.Optional(t.String({ maxLength: 500 })),
+          /** Optional time-box (seconds) for the requested scopes; omit for permanent. */
+          expiresInSeconds: t.Optional(t.Integer({ minimum: 1 })),
           resourceType: t.Optional(t.Union([t.Literal('org'), t.Literal('project'), t.Literal('branch')])),
           resourceId: t.Optional(t.String()),
         }),

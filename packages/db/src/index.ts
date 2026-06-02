@@ -7,6 +7,7 @@ export {
   projects,
   agents,
   agentGrants,
+  agentGrantScopes,
   scopeRequests,
   queryEvents,
 } from './schema.ts'
@@ -30,6 +31,8 @@ export type {
   NewAgent,
   AgentGrant,
   NewAgentGrant,
+  AgentGrantScope,
+  NewAgentGrantScope,
   ScopeRequest,
   NewScopeRequest,
   QueryEvent,
