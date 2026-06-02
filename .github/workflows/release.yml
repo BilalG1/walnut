@@ -1,0 +1,27 @@
+name: release
+
+# Tag a release (e.g. `git tag v0.2.0 && git push --tags`) to cross-compile the
+# walnut CLI and publish the binaries that https://walnut.sh/install downloads.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build release artifacts
+        run: VERSION="${GITHUB_REF_NAME}" scripts/build-release.sh
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/cli/dist/walnut-*
+          generate_release_notes: true

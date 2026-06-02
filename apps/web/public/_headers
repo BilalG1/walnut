@@ -1,0 +1,6 @@
+# Cloudflare Pages / Netlify header rules (ignored by other hosts).
+# The CLI installer is an extensionless asset; serve it as readable, lightly-cached text
+# so `curl -fsSL https://walnut.sh/install | bash` works and humans can inspect it first.
+/install
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
