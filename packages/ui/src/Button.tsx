@@ -1,11 +1,12 @@
 import type { ButtonHTMLAttributes } from 'react'
 import { cn } from './lib/cn.ts'
 
-export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle'
+export type ButtonVariant = 'primary' | 'success' | 'ghost' | 'danger' | 'subtle'
 export type ButtonSize = 'sm' | 'md' | 'icon'
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-walnut-500 text-white hover:bg-walnut-600 shadow-sm',
+  success: 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-sm',
   ghost: 'border border-neutral-700 text-neutral-100 hover:bg-neutral-800',
   danger: 'border border-red-500/30 text-red-300 hover:bg-red-500/10',
   subtle: 'text-neutral-400 hover:text-neutral-100',

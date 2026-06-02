@@ -1,10 +1,17 @@
 import { Elysia, t } from 'elysia'
 import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
-import { toOrgAgentView, toOrgProjectSummary, toOrgSummary, toProjectDetail } from '../serializers.ts'
+import {
+  toOrgAgentView,
+  toOrgProjectSummary,
+  toOrgSummary,
+  toProjectDetail,
+  toScopeRequestView,
+} from '../serializers.ts'
 import { listOrgAgents } from '../services/agents.ts'
 import { listOrganizations } from '../services/organizations.ts'
 import { createProject, listOrgProjects } from '../services/projects.ts'
+import { listOrgScopeRequests } from '../services/scope-requests.ts'
 
 export function organizationRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/organizations' })
@@ -36,4 +43,16 @@ export function organizationRoutes(ctx: AppContext) {
       const rows = await listOrgAgents(ctx, params.orgId, userId)
       return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectName))
     })
+    .get(
+      '/:orgId/requests',
+      async ({ userId, params, query }) => {
+        const rows = await listOrgScopeRequests(ctx, params.orgId, userId, { status: query.status })
+        return rows.map(toScopeRequestView)
+      },
+      {
+        query: t.Object({
+          status: t.Optional(t.Union([t.Literal('pending'), t.Literal('approved'), t.Literal('denied')])),
+        }),
+      },
+    )
 }

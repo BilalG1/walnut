@@ -3,7 +3,9 @@ import { AppLayout } from '../components/layout/AppLayout.tsx'
 import { keys } from '../data/keys.ts'
 import { fetchOrganizations } from '../data/queries.ts'
 import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
+import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
+import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
 import { OverviewPage } from '../features/projects/OverviewPage.tsx'
 import { queryClient } from './queryClient.ts'
 
@@ -26,16 +28,8 @@ const indexRoute = createRoute({
 // Org scope -----------------------------------------------------------------
 const orgRoute = createRoute({ getParentRoute: () => rootRoute, path: 'orgs/$orgId' })
 const orgIndexRoute = createRoute({ getParentRoute: () => orgRoute, path: '/', component: ProjectsPage })
-const orgAgentsRoute = createRoute({
-  getParentRoute: () => orgRoute,
-  path: 'agents',
-  component: () => <PlaceholderPage title="Agents" />,
-})
-const orgRequestsRoute = createRoute({
-  getParentRoute: () => orgRoute,
-  path: 'requests',
-  component: () => <PlaceholderPage title="Requests" />,
-})
+const orgAgentsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'agents', component: AgentsPage })
+const orgRequestsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'requests', component: RequestsPage })
 const orgMembersRoute = createRoute({
   getParentRoute: () => orgRoute,
   path: 'members',

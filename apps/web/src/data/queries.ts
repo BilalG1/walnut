@@ -19,6 +19,36 @@ export function useOrgProjects(orgId: string) {
   })
 }
 
+export function useOrgAgents(orgId: string) {
+  return useQuery({
+    queryKey: keys.orgAgents(orgId),
+    queryFn: () => unwrap(api.api.organizations({ orgId }).agents.get()),
+  })
+}
+
+export function useOrgRequests(orgId: string, status: 'pending' | 'approved' | 'denied') {
+  return useQuery({
+    queryKey: keys.orgRequests(orgId, status),
+    queryFn: () => unwrap(api.api.organizations({ orgId }).requests.get({ query: { status } })),
+  })
+}
+
+/** Approve or deny a scope request, then refresh the org's requests, agents and projects. */
+export function useResolveRequest(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'approve' | 'deny' }) =>
+      decision === 'approve'
+        ? unwrap(api.api['scope-requests']({ id }).approve.post())
+        : unwrap(api.api['scope-requests']({ id }).deny.post()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgRequests(orgId, 'pending') })
+      void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
+      void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
+    },
+  })
+}
+
 export function useBranches(projectId: string) {
   return useQuery({
     queryKey: keys.branches(projectId),

@@ -11,6 +11,29 @@ import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
 import { grantScopes } from './agents.ts'
+import { assertOrgMember } from './organizations.ts'
+
+/** Scope requests for every project in one organization (caller must be a member). */
+export async function listOrgScopeRequests(
+  ctx: AppContext,
+  orgId: string,
+  userId: string,
+  opts: { status?: ScopeRequestStatus } = {},
+): Promise<ScopeRequest[]> {
+  await assertOrgMember(ctx, orgId, userId)
+  const rows = await ctx.db
+    .select({ req: scopeRequests })
+    .from(scopeRequests)
+    .innerJoin(projects, eq(scopeRequests.projectId, projects.id))
+    .where(
+      and(
+        eq(projects.organizationId, orgId),
+        opts.status !== undefined ? eq(scopeRequests.status, opts.status) : undefined,
+      ),
+    )
+    .orderBy(desc(scopeRequests.createdAt))
+  return rows.map((r) => r.req)
+}
 
 /** Dashboard view: scope requests across all projects in the user's organizations. */
 export async function listScopeRequests(

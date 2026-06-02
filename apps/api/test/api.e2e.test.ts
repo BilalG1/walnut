@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
+import { SYSTEM_USER_ID } from '@walnut/core'
 import { agentGrants, branches, organizationMembers, organizations } from '@walnut/db'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
@@ -707,6 +708,43 @@ describe('organizations', () => {
     const stranger = await h.clientFor('33333333-3333-3333-3333-333333333333', { email: 'stranger3@example.com' })
     const res = await stranger.api.organizations({ orgId }).projects.post({ name: 'sneaky' })
     expect(res.status).toBe(404)
+  })
+
+  test('GET /api/organizations/:orgId/requests lists the org\'s scope requests', async () => {
+    const project = await newProject('reqs')
+    const agent = await newAgent(project.id, 'r-bot')
+    await h.api.agent.v1['scope-requests'].post({ scopes: ['db:write'] }, { headers: bearer(agent.apiKey) })
+    const orgId = await personalOrgId()
+
+    const res = await h.api.api.organizations({ orgId }).requests.get({ query: { status: 'pending' } })
+    expect(res.status).toBe(200)
+    expect(res.data?.some((r) => r.agentId === agent.id)).toBe(true)
+  })
+
+  test('a non-member cannot read an org\'s requests (404)', async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('44444444-4444-4444-4444-444444444444', { email: 'stranger4@example.com' })
+    const res = await stranger.api.organizations({ orgId }).requests.get()
+    expect(res.status).toBe(404)
+  })
+
+  test("an org's request list excludes other orgs' requests (tenant isolation)", async () => {
+    const project = await newProject('iso')
+    const agent = await newAgent(project.id, 'iso-bot')
+    await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agent.apiKey) })
+    const orgA = await personalOrgId()
+
+    // A second org the same user also belongs to, with no projects/requests of its own.
+    const [orgB] = await h.ctx.db.insert(organizations).values({ name: 'Org B' }).returning({ id: organizations.id })
+    if (orgB === undefined) {
+      throw new Error('failed to insert second org')
+    }
+    await h.ctx.db.insert(organizationMembers).values({ organizationId: orgB.id, userId: SYSTEM_USER_ID, role: 'member' })
+
+    const inA = await h.api.api.organizations({ orgId: orgA }).requests.get({ query: { status: 'pending' } })
+    expect(inA.data?.some((r) => r.agentId === agent.id)).toBe(true)
+    const inB = await h.api.api.organizations({ orgId: orgB.id }).requests.get({ query: { status: 'pending' } })
+    expect(inB.data).toEqual([])
   })
 })
 
