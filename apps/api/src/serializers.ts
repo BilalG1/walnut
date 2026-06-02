@@ -17,7 +17,7 @@ export interface ProjectDetail extends ProjectSummary {
 
 export interface AgentView {
   id: string
-  projectId: string
+  organizationId: string
   name: string
   keyPrefix: string
   scopes: string[]
@@ -31,7 +31,9 @@ export interface AgentWithKey extends AgentView {
 export interface ScopeRequestView {
   id: string
   agentId: string
-  projectId: string
+  organizationId: string
+  resourceType: string
+  resourceId: string
   scopes: string[]
   reason: string | null
   status: string
@@ -63,7 +65,7 @@ export function effectiveScopes(grants: readonly AgentGrant[]): string[] {
 export function toAgentView(agent: Agent, grants: readonly AgentGrant[]): AgentView {
   return {
     id: agent.id,
-    projectId: agent.projectId,
+    organizationId: agent.organizationId,
     name: agent.name,
     keyPrefix: agent.keyPrefix,
     scopes: effectiveScopes(grants),
@@ -75,7 +77,9 @@ export function toScopeRequestView(r: ScopeRequest): ScopeRequestView {
   return {
     id: r.id,
     agentId: r.agentId,
-    projectId: r.projectId,
+    organizationId: r.organizationId,
+    resourceType: r.resourceType,
+    resourceId: r.resourceId,
     scopes: r.scopes,
     reason: r.reason,
     status: r.status,
@@ -117,12 +121,13 @@ export function toOrgProjectSummary(
   return { ...toProjectSummary(p), ...extra }
 }
 
-/** An agent in the org-wide roster: its view plus the name of its home project. */
+/** An agent in the org-wide roster: its view plus the name of its home project (null if
+ * it holds no project grant). */
 export interface OrgAgentView extends AgentView {
-  projectName: string
+  projectName: string | null
 }
 
-export function toOrgAgentView(agent: Agent, grants: readonly AgentGrant[], projectName: string): OrgAgentView {
+export function toOrgAgentView(agent: Agent, grants: readonly AgentGrant[], projectName: string | null): OrgAgentView {
   return { ...toAgentView(agent, grants), projectName }
 }
 

@@ -1,5 +1,5 @@
 {
-  "id": "421436e5-6b78-4439-bd48-867594706279",
+  "id": "a09e9951-7373-4440-b802-fdadb68b0eef",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -103,8 +103,8 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "project_id": {
-          "name": "project_id",
+        "organization_id": {
+          "name": "organization_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -137,12 +137,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "agents_project_id_projects_id_fk": {
-          "name": "agents_project_id_projects_id_fk",
+        "agents_organization_id_organizations_id_fk": {
+          "name": "agents_organization_id_organizations_id_fk",
           "tableFrom": "agents",
-          "tableTo": "projects",
+          "tableTo": "organizations",
           "columnsFrom": [
-            "project_id"
+            "organization_id"
           ],
           "columnsTo": [
             "id"
@@ -466,8 +466,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.scope_requests": {
-      "name": "scope_requests",
+    "public.query_events": {
+      "name": "query_events",
       "schema": "",
       "columns": {
         "id": {
@@ -485,6 +485,127 @@
         },
         "project_id": {
           "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sql": {
+          "name": "sql",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "command": {
+          "name": "command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "required_scopes": {
+          "name": "required_scopes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "row_count": {
+          "name": "row_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_ms": {
+          "name": "duration_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "query_events_agent_id_agents_id_fk": {
+          "name": "query_events_agent_id_agents_id_fk",
+          "tableFrom": "query_events",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "query_events_project_id_projects_id_fk": {
+          "name": "query_events_project_id_projects_id_fk",
+          "tableFrom": "query_events",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.scope_requests": {
+      "name": "scope_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_type": {
+          "name": "resource_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_id": {
+          "name": "resource_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -537,12 +658,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "scope_requests_project_id_projects_id_fk": {
-          "name": "scope_requests_project_id_projects_id_fk",
+        "scope_requests_organization_id_organizations_id_fk": {
+          "name": "scope_requests_organization_id_organizations_id_fk",
           "tableFrom": "scope_requests",
-          "tableTo": "projects",
+          "tableTo": "organizations",
           "columnsFrom": [
-            "project_id"
+            "organization_id"
           ],
           "columnsTo": [
             "id"

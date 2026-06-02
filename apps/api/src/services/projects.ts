@@ -1,6 +1,6 @@
 import { type ProvisionedDatabase, setupProjectRoles } from '@walnut/core'
-import { agents, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
-import { and, count, desc, eq, inArray } from 'drizzle-orm'
+import { agentGrants, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
+import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
 import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
@@ -37,28 +37,43 @@ export async function listOrgProjects(ctx: AppContext, orgId: string, userId: st
   }
   const ids = rows.map((p) => p.id)
 
-  const agentCounts = await ctx.db
-    .select({ projectId: agents.projectId, n: count() })
-    .from(agents)
-    .where(inArray(agents.projectId, ids))
-    .groupBy(agents.projectId)
+  // "Agents on a project" = distinct agents holding a project grant on it (an agent is
+  // org-scoped, so it counts toward every project it has been granted access to).
+  const agentGrantRows = await ctx.db
+    .select({ resourceId: agentGrants.resourceId, agentId: agentGrants.agentId })
+    .from(agentGrants)
+    .where(and(eq(agentGrants.resourceType, 'project'), inArray(agentGrants.resourceId, ids)))
   const pendingCounts = await ctx.db
-    .select({ projectId: scopeRequests.projectId, n: count() })
+    .select({ resourceId: scopeRequests.resourceId, n: count() })
     .from(scopeRequests)
-    .where(and(inArray(scopeRequests.projectId, ids), eq(scopeRequests.status, 'pending')))
-    .groupBy(scopeRequests.projectId)
+    .where(
+      and(
+        eq(scopeRequests.resourceType, 'project'),
+        inArray(scopeRequests.resourceId, ids),
+        eq(scopeRequests.status, 'pending'),
+      ),
+    )
+    .groupBy(scopeRequests.resourceId)
   const defaultBranches = await ctx.db
     .select({ projectId: branches.projectId, name: branches.name })
     .from(branches)
     .where(and(inArray(branches.projectId, ids), eq(branches.isDefault, true)))
 
-  const agentByProject = new Map(agentCounts.map((r) => [r.projectId, Number(r.n)]))
-  const pendingByProject = new Map(pendingCounts.map((r) => [r.projectId, Number(r.n)]))
+  const agentsByProject = new Map<string, Set<string>>()
+  for (const r of agentGrantRows) {
+    let set = agentsByProject.get(r.resourceId)
+    if (set === undefined) {
+      set = new Set()
+      agentsByProject.set(r.resourceId, set)
+    }
+    set.add(r.agentId)
+  }
+  const pendingByProject = new Map(pendingCounts.map((r) => [r.resourceId, Number(r.n)]))
   const branchByProject = new Map(defaultBranches.map((r) => [r.projectId, r.name]))
 
   return rows.map((project) => ({
     project,
-    agentCount: agentByProject.get(project.id) ?? 0,
+    agentCount: agentsByProject.get(project.id)?.size ?? 0,
     pendingRequestCount: pendingByProject.get(project.id) ?? 0,
     defaultBranch: branchByProject.get(project.id) ?? null,
   }))
@@ -172,5 +187,30 @@ export async function deleteProject(ctx: AppContext, id: string, userId: string)
       console.error(`Failed to destroy provider database for project ${id}:`, err)
     }
   }
+  // agent_grants / scope_requests reference resources polymorphically (no FK cascade), so
+  // clear the rows anchored to this project and its branches before dropping it. Agents are
+  // org-scoped and survive — they simply lose their access to this project.
+  const projBranches = await ctx.db.select({ id: branches.id }).from(branches).where(eq(branches.projectId, id))
+  const branchIds = projBranches.map((b) => b.id)
+  await ctx.db
+    .delete(agentGrants)
+    .where(
+      or(
+        and(eq(agentGrants.resourceType, 'project'), eq(agentGrants.resourceId, id)),
+        branchIds.length > 0
+          ? and(eq(agentGrants.resourceType, 'branch'), inArray(agentGrants.resourceId, branchIds))
+          : undefined,
+      ),
+    )
+  await ctx.db
+    .delete(scopeRequests)
+    .where(
+      or(
+        and(eq(scopeRequests.resourceType, 'project'), eq(scopeRequests.resourceId, id)),
+        branchIds.length > 0
+          ? and(eq(scopeRequests.resourceType, 'branch'), inArray(scopeRequests.resourceId, branchIds))
+          : undefined,
+      ),
+    )
   await ctx.db.delete(projects).where(eq(projects.id, id))
 }

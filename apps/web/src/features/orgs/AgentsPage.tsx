@@ -73,7 +73,7 @@ function AgentsView({ orgId }: { orgId: string }) {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-neutral-400">{a.projectName}</td>
+                    <td className="px-4 py-3 text-neutral-400">{a.projectName ?? '—'}</td>
                     <td className="px-4 py-3">
                       {a.scopes.length === 0 ? (
                         <span className="text-xs text-neutral-500">no scopes</span>

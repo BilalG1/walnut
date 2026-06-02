@@ -95,11 +95,12 @@ export const branches = pgTable(
 
 export const agents = pgTable('agents', {
   id: uuid('id').primaryKey().defaultRandom(),
-  /** The agent's home/tenancy project (who created it). Authorization lives in
-   * `agent_grants`, not here — eventually this pointer moves up to an org. */
-  projectId: uuid('project_id')
+  /** The agent's home organization (its tenancy). An agent acts across the org's
+   * projects via per-resource rows in `agent_grants`; authorization lives there,
+   * never here. Created with one grant on the project it was minted in. */
+  organizationId: uuid('organization_id')
     .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
+    .references(() => organizations.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   /** SHA-256 of the agent's API key; the key itself is shown only once at creation. */
   keyHash: text('key_hash').notNull().unique(),
@@ -110,9 +111,9 @@ export const agents = pgTable('agents', {
 
 /**
  * What an agent can do, and where. Each grant binds an agent to one resource node
- * (today always a project) with a set of scopes, enforced by its own restricted
- * Postgres role/connection. One agent can hold many grants (per-resource scopes);
- * for the MVP every agent has exactly one, on its home project.
+ * (an org, project, or branch) with a set of scopes, enforced by its own restricted
+ * Postgres role/connection. One agent can hold many grants — one per resource it has
+ * been granted access to. Every agent starts with a single project grant (its home).
  */
 export const agentGrants = pgTable(
   'agent_grants',
@@ -142,9 +143,16 @@ export const scopeRequests = pgTable('scope_requests', {
   agentId: uuid('agent_id')
     .notNull()
     .references(() => agents.id, { onDelete: 'cascade' }),
-  projectId: uuid('project_id')
+  /** The org the request belongs to (the requesting agent's org). Denormalized so the
+   * dashboard scopes and approves requests by org membership without having to resolve
+   * the target resource first. */
+  organizationId: uuid('organization_id')
     .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  /** The resource the requested scopes apply to — same discriminator as `agent_grants`
+   * (an org, project, or branch id). No FK: the reference is polymorphic. */
+  resourceType: text('resource_type').$type<GrantResourceType>().notNull(),
+  resourceId: uuid('resource_id').notNull(),
   scopes: jsonb('scopes').$type<AgentScope[]>().notNull(),
   reason: text('reason'),
   status: text('status').$type<ScopeRequestStatus>().notNull().default('pending'),

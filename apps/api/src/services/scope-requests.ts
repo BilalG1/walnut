@@ -1,7 +1,7 @@
-import type { AgentScope } from '@walnut/core'
+import { type AgentScope, type GrantResourceType, parseScopesForResource } from '@walnut/core'
 import {
+  branches,
   organizationMembers,
-  projects,
   scopeRequests,
   type Agent,
   type ScopeRequest,
@@ -9,11 +9,12 @@ import {
 } from '@walnut/db'
 import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { HttpError, notFound } from '../errors.ts'
-import { grantScopes } from './agents.ts'
+import { badRequest, HttpError, notFound } from '../errors.ts'
+import { grantScopes, resolveAgentProject } from './agents.ts'
 import { assertOrgMember } from './organizations.ts'
+import { getProjectInternal } from './projects.ts'
 
-/** Scope requests for every project in one organization (caller must be a member). */
+/** Scope requests for one organization (caller must be a member). */
 export async function listOrgScopeRequests(
   ctx: AppContext,
   orgId: string,
@@ -21,21 +22,19 @@ export async function listOrgScopeRequests(
   opts: { status?: ScopeRequestStatus } = {},
 ): Promise<ScopeRequest[]> {
   await assertOrgMember(ctx, orgId, userId)
-  const rows = await ctx.db
-    .select({ req: scopeRequests })
+  return ctx.db
+    .select()
     .from(scopeRequests)
-    .innerJoin(projects, eq(scopeRequests.projectId, projects.id))
     .where(
       and(
-        eq(projects.organizationId, orgId),
+        eq(scopeRequests.organizationId, orgId),
         opts.status !== undefined ? eq(scopeRequests.status, opts.status) : undefined,
       ),
     )
     .orderBy(desc(scopeRequests.createdAt))
-  return rows.map((r) => r.req)
 }
 
-/** Dashboard view: scope requests across all projects in the user's organizations. */
+/** Dashboard view: scope requests across all of the user's organizations. */
 export async function listScopeRequests(
   ctx: AppContext,
   userId: string,
@@ -44,8 +43,7 @@ export async function listScopeRequests(
   const rows = await ctx.db
     .select({ req: scopeRequests })
     .from(scopeRequests)
-    .innerJoin(projects, eq(scopeRequests.projectId, projects.id))
-    .innerJoin(organizationMembers, eq(projects.organizationId, organizationMembers.organizationId))
+    .innerJoin(organizationMembers, eq(scopeRequests.organizationId, organizationMembers.organizationId))
     .where(
       and(
         eq(organizationMembers.userId, userId),
@@ -65,17 +63,74 @@ export async function listAgentScopeRequests(ctx: AppContext, agentId: string): 
     .orderBy(desc(scopeRequests.createdAt))
 }
 
-export async function createScopeRequest(
+/** Confirm a resource belongs to the org (and exists), else 404 — no existence leak. */
+async function assertResourceInOrg(
   ctx: AppContext,
-  agent: Agent,
-  input: { scopes: AgentScope[]; reason?: string },
-): Promise<ScopeRequest> {
+  orgId: string,
+  resourceType: GrantResourceType,
+  resourceId: string,
+): Promise<void> {
+  if (resourceType === 'org') {
+    if (resourceId !== orgId) {
+      throw notFound('Organization')
+    }
+    return
+  }
+  if (resourceType === 'branch') {
+    const [branch] = await ctx.db
+      .select({ projectId: branches.projectId })
+      .from(branches)
+      .where(eq(branches.id, resourceId))
+      .limit(1)
+    if (branch === undefined || (await getProjectInternal(ctx, branch.projectId)).organizationId !== orgId) {
+      throw notFound('Branch')
+    }
+    return
+  }
+  if ((await getProjectInternal(ctx, resourceId)).organizationId !== orgId) {
+    throw notFound('Project')
+  }
+}
+
+export interface ScopeRequestInput {
+  scopes: string[]
+  reason?: string
+  /** Target resource. Both must be supplied together; omit to default to the agent's
+   * single project (it errors if the agent can reach zero or several). */
+  resourceType?: GrantResourceType
+  resourceId?: string
+}
+
+export async function createScopeRequest(ctx: AppContext, agent: Agent, input: ScopeRequestInput): Promise<ScopeRequest> {
+  let resourceType: GrantResourceType
+  let resourceId: string
+  if (input.resourceType !== undefined || input.resourceId !== undefined) {
+    if (input.resourceType === undefined || input.resourceId === undefined) {
+      throw badRequest('resourceType and resourceId must be provided together.')
+    }
+    resourceType = input.resourceType
+    resourceId = input.resourceId
+    await assertResourceInOrg(ctx, agent.organizationId, resourceType, resourceId)
+  } else {
+    resourceType = 'project'
+    resourceId = (await resolveAgentProject(ctx, agent)).id
+  }
+
+  let scopes: AgentScope[]
+  try {
+    scopes = parseScopesForResource(resourceType, input.scopes)
+  } catch (err) {
+    throw badRequest(err instanceof Error ? err.message : 'Invalid scopes.')
+  }
+
   const [created] = await ctx.db
     .insert(scopeRequests)
     .values({
       agentId: agent.id,
-      projectId: agent.projectId,
-      scopes: input.scopes,
+      organizationId: agent.organizationId,
+      resourceType,
+      resourceId,
+      scopes,
       reason: input.reason ?? null,
       status: 'pending',
     })
@@ -90,8 +145,7 @@ async function getOwnedScopeRequest(ctx: AppContext, id: string, userId: string)
   const [row] = await ctx.db
     .select({ req: scopeRequests })
     .from(scopeRequests)
-    .innerJoin(projects, eq(scopeRequests.projectId, projects.id))
-    .innerJoin(organizationMembers, eq(projects.organizationId, organizationMembers.organizationId))
+    .innerJoin(organizationMembers, eq(scopeRequests.organizationId, organizationMembers.organizationId))
     .where(and(eq(scopeRequests.id, id), eq(organizationMembers.userId, userId)))
     .limit(1)
   if (row === undefined) {
@@ -119,9 +173,9 @@ export async function resolveScopeRequest(
   }
 
   if (decision === 'approved') {
-    // Merge the requested scopes into the agent's grant for the anchored resource
-    // (a project, today) and sync its Postgres role memberships.
-    await grantScopes(ctx, request.agentId, 'project', request.projectId, request.scopes)
+    // Merge the requested scopes into the agent's grant for the anchored resource and
+    // sync its Postgres role memberships (provisioning the grant/role if it's the first).
+    await grantScopes(ctx, request.agentId, request.resourceType, request.resourceId, request.scopes)
   }
 
   const [updated] = await ctx.db

@@ -181,7 +181,7 @@ describe('agent API authentication', () => {
     const res = await h.api.agent.v1.identity.get({ headers: bearer(agent.apiKey) })
     expect(res.data?.id).toBe(agent.id)
     expect(res.data?.scopes).toEqual([])
-    expect(res.data?.project.id).toBe(project.id)
+    expect(res.data?.project?.id).toBe(project.id)
   })
 })
 
@@ -429,6 +429,102 @@ describe('scope requests', () => {
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:write'] }, { headers: auth })
     const list = await h.api.agent.v1['scope-requests'].get({ headers: auth })
     expect(list.data?.length).toBe(2)
+  })
+})
+
+describe('org-scoped agents', () => {
+  test('identity reports the agent\'s organization and home project', async () => {
+    const project = await newProject('home')
+    const agent = await newAgent(project.id, 'org-bot')
+    const res = await h.api.agent.v1.identity.get({ headers: bearer(agent.apiKey) })
+    expect(typeof res.data?.organization.id).toBe('string')
+    expect(res.data?.project?.id).toBe(project.id)
+  })
+
+  test('an agent can be granted access to a second project in its org and query it', async () => {
+    const home = await newProject('home-proj')
+    const other = await newProject('other-proj')
+    const agent = await newAgent(home.id, 'multi-bot')
+    const auth = bearer(agent.apiKey)
+
+    // Request db:read explicitly on the OTHER project (not the home/default target).
+    const req = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:read'], resourceType: 'project', resourceId: other.id },
+      { headers: auth },
+    )
+    expect(req.status).toBe(200)
+    expect(req.data?.resourceType).toBe('project')
+    expect(req.data?.resourceId).toBe(other.id)
+    const id = req.data?.id
+    if (id === undefined) throw new Error('no request id')
+    await h.api.api['scope-requests']({ id }).approve.post()
+
+    // It now holds grants on two projects, so an untargeted query is ambiguous.
+    const ambiguous = await h.api.agent.v1.query.post({ sql: 'select 1' }, { headers: auth })
+    expect(ambiguous.status).toBe(400)
+    expect((ambiguous.error?.value as ErrorBody | undefined)?.error).toBe('ambiguous_project')
+
+    // Targeting the OTHER project (where it has db:read) succeeds over its own role.
+    const ok = await h.api.agent.v1.query.post({ sql: 'select 1 as n', projectId: other.id }, { headers: auth })
+    expect(ok.status).toBe(200)
+    expect(ok.data?.rows).toEqual([{ n: 1 }])
+
+    // The home project still has no scopes, so a query there is denied.
+    const denied = await h.api.agent.v1.query.post({ sql: 'select 1', projectId: home.id }, { headers: auth })
+    expect(denied.status).toBe(403)
+  }, 20_000)
+
+  test('requesting db scopes at the org level is rejected (no org database)', async () => {
+    const project = await newProject('orglevel')
+    const agent = await newAgent(project.id, 'org-req-bot')
+    const orgId = await personalOrgId()
+    const res = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:read'], resourceType: 'org', resourceId: orgId },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(400)
+  })
+
+  test('deleting a project clears its grants/requests; the org-scoped agent survives', async () => {
+    const home = await newProject('keep')
+    const other = await newProject('drop')
+    const agent = await newAgent(home.id, 'survivor')
+    const auth = bearer(agent.apiKey)
+
+    // Grant the agent access to the second project, then delete that project.
+    const req = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:read'], resourceType: 'project', resourceId: other.id },
+      { headers: auth },
+    )
+    const id = req.data?.id
+    if (id === undefined) throw new Error('no request id')
+    await h.api.api['scope-requests']({ id }).approve.post()
+    await h.api.api.projects({ id: other.id }).delete()
+
+    // The grant on the deleted project is gone, so the agent has only its home project:
+    // identity still resolves (no dangling reference) and an untargeted query is no longer
+    // ambiguous — it falls back to the home project (where it has no scopes → 403).
+    const identity = await h.api.agent.v1.identity.get({ headers: auth })
+    expect(identity.status).toBe(200)
+    expect(identity.data?.project?.id).toBe(home.id)
+    const q = await h.api.agent.v1.query.post({ sql: 'select 1' }, { headers: auth })
+    expect(q.status).toBe(403)
+    expect((q.error?.value as ErrorBody | undefined)?.error).toBe('insufficient_scope')
+  }, 20_000)
+
+  test('requesting access on a project in another org is 404 (no existence leak)', async () => {
+    const project = await newProject('mine')
+    const agent = await newAgent(project.id, 'leak-bot')
+    const stranger = await h.clientFor('66666666-6666-6666-6666-666666666666', { email: 'stranger6@example.com' })
+    const theirs = await stranger.api.projects.post({ name: 'theirs' })
+    const theirId = theirs.data?.id
+    if (theirId === undefined) throw new Error('stranger project create failed')
+
+    const res = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:read'], resourceType: 'project', resourceId: theirId },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(404)
   })
 })
 

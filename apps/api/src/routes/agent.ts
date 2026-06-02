@@ -1,12 +1,10 @@
-import { parseScopes } from '@walnut/core'
 import { Elysia, t } from 'elysia'
 import { extractBearer } from '../auth/bearer.ts'
 import type { AppContext } from '../context.ts'
-import { badRequest, HttpError, unauthorized } from '../errors.ts'
+import { HttpError, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
-import { findAgentByKey, getAgentGrant } from '../services/agents.ts'
-import { getProjectInternal } from '../services/projects.ts'
+import { findAgentByKey, getAgentGrant, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
 
@@ -21,26 +19,34 @@ export function agentApiRoutes(ctx: AppContext) {
       if (agent === undefined) {
         throw unauthorized('Invalid agent API key.')
       }
-      const project = await getProjectInternal(ctx, agent.projectId)
-      // The agent's access to its home project. Every agent has this grant from birth.
-      const grant = await getAgentGrant(ctx, agent.id, 'project', agent.projectId)
-      if (grant === undefined) {
-        throw unauthorized('Agent has no grant; recreate it.')
-      }
-      return { agent, project, grant }
+      return { agent }
     })
-    .get('/identity', ({ agent, project, grant }) => ({
-      id: agent.id,
-      name: agent.name,
-      scopes: grant.scopes,
-      project: { id: project.id, name: project.name, status: project.status },
-    }))
+    .get('/identity', async ({ agent }) => {
+      // An org-scoped agent has no single project; report its home project (the first it
+      // was granted) and that grant's scopes, plus the org it belongs to.
+      const home = await getAgentHomeProject(ctx, agent)
+      return {
+        id: agent.id,
+        name: agent.name,
+        organization: { id: agent.organizationId },
+        scopes: home?.scopes ?? [],
+        project: home === null ? null : { id: home.project.id, name: home.project.name, status: home.project.status },
+      }
+    })
     .post(
       '/query',
-      async ({ agent, project, grant, body }) => {
+      async ({ agent, body }) => {
+        // Pick the target project (explicit, or the agent's sole granted project) and run
+        // over its scoped grant — defense in depth behind the SQL classifier.
+        const project = await resolveAgentProject(ctx, agent, body.projectId)
+        const grant = await getAgentGrant(ctx, agent.id, 'project', project.id)
         const startedAt = Date.now()
         try {
-          const result = await runAgentQuery(project, grant, body.sql)
+          const result = await runAgentQuery(
+            project,
+            { scopes: grant?.scopes ?? [], connectionUri: grant?.connectionUri ?? null },
+            body.sql,
+          )
           await recordQueryEvent(ctx, {
             agentId: agent.id,
             projectId: project.id,
@@ -70,24 +76,25 @@ export function agentApiRoutes(ctx: AppContext) {
           throw err
         }
       },
-      { body: t.Object({ sql: t.String({ minLength: 1 }) }) },
+      { body: t.Object({ sql: t.String({ minLength: 1 }), projectId: t.Optional(t.String()) }) },
     )
     .post(
       '/scope-requests',
       async ({ agent, body }) => {
-        let scopes
-        try {
-          scopes = parseScopes(body.scopes)
-        } catch (err) {
-          throw badRequest(err instanceof Error ? err.message : 'Invalid scopes.')
-        }
-        const created = await createScopeRequest(ctx, agent, { scopes, reason: body.reason })
+        const created = await createScopeRequest(ctx, agent, {
+          scopes: body.scopes,
+          reason: body.reason,
+          resourceType: body.resourceType,
+          resourceId: body.resourceId,
+        })
         return toScopeRequestView(created)
       },
       {
         body: t.Object({
           scopes: t.Array(t.String(), { minItems: 1 }),
           reason: t.Optional(t.String({ maxLength: 500 })),
+          resourceType: t.Optional(t.Union([t.Literal('org'), t.Literal('project'), t.Literal('branch')])),
+          resourceId: t.Optional(t.String()),
         }),
       },
     )

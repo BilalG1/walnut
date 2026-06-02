@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1780366113284,
-      "tag": "0000_wide_lockjaw",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1780384258912,
-      "tag": "0001_loving_eternity",
+      "when": 1780422970008,
+      "tag": "0000_material_banshee",
       "breakpoints": true
     }
   ]
