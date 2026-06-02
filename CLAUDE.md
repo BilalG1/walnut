@@ -105,8 +105,9 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
   migrations, backwards compatibility, and deprecation shims are wasted effort. Reshape
   schemas, rename things, and change contracts directly; regenerate migrations from the
   current schema rather than preserving history. Just keep `bun run check` green.
-- **Commit to `main` locally by default.** Make small local commits straight on `main`;
-  don't open PRs or create feature branches unless I explicitly ask for one.
+- **Never commit directly to `main` by default.** If you're working in a worktree, commit
+  to that worktree's branch. Otherwise, create a new branch off `main` and commit there.
+  Only commit straight to `main` when I explicitly tell you to. Don't open PRs unless I ask.
 
 ## The agent model (the point of the project)
 
