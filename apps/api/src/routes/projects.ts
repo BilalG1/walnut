@@ -1,4 +1,5 @@
 import { Elysia, t } from 'elysia'
+import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import { toAgentView, toProjectDetail, toProjectSummary } from '../serializers.ts'
 import { createAgent, listAgents } from '../services/agents.ts'
@@ -8,28 +9,33 @@ const nameSchema = t.String({ minLength: 1, maxLength: 64 })
 
 export function projectRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/projects' })
-    .get('/', async () => {
-      const rows = await listProjects(ctx)
+    .resolve(async ({ headers, set }) => {
+      const auth = await authenticate(ctx, headers.authorization)
+      set.headers['cache-control'] = 'private, no-store'
+      return auth
+    })
+    .get('/', async ({ userId }) => {
+      const rows = await listProjects(ctx, userId)
       return rows.map(toProjectSummary)
     })
     .post(
       '/',
-      async ({ body }) => toProjectDetail(await createProject(ctx, body)),
+      async ({ userId, body }) => toProjectDetail(await createProject(ctx, userId, body)),
       { body: t.Object({ name: nameSchema }) },
     )
-    .get('/:id', async ({ params }) => toProjectDetail(await getProject(ctx, params.id)))
-    .delete('/:id', async ({ params }) => {
-      await deleteProject(ctx, params.id)
+    .get('/:id', async ({ userId, params }) => toProjectDetail(await getProject(ctx, params.id, userId)))
+    .delete('/:id', async ({ userId, params }) => {
+      await deleteProject(ctx, params.id, userId)
       return { deleted: true }
     })
-    .get('/:id/agents', async ({ params }) => {
-      const rows = await listAgents(ctx, params.id)
+    .get('/:id/agents', async ({ userId, params }) => {
+      const rows = await listAgents(ctx, params.id, userId)
       return rows.map(({ agent, grants }) => toAgentView(agent, grants))
     })
     .post(
       '/:id/agents',
-      async ({ params, body }) => {
-        const { agent, grants, apiKey } = await createAgent(ctx, params.id, body)
+      async ({ userId, params, body }) => {
+        const { agent, grants, apiKey } = await createAgent(ctx, params.id, userId, body)
         return { ...toAgentView(agent, grants), apiKey }
       },
       { body: t.Object({ name: nameSchema }) },

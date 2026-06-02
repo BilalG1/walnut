@@ -1,18 +1,22 @@
-import { type ProvisionedDatabase, SYSTEM_USER_ID, setupProjectRoles } from '@walnut/core'
-import { projects, type Project } from '@walnut/db'
+import { type ProvisionedDatabase, setupProjectRoles } from '@walnut/core'
+import { branches, organizationMembers, projects, type Project } from '@walnut/db'
 import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
+import { getDefaultOrgId } from './organizations.ts'
 
-export async function listProjects(ctx: AppContext): Promise<Project[]> {
-  return ctx.db
-    .select()
+/** A user's projects: those in any organization they're a member of. */
+export async function listProjects(ctx: AppContext, userId: string): Promise<Project[]> {
+  const rows = await ctx.db
+    .select({ project: projects })
     .from(projects)
-    .where(eq(projects.userId, SYSTEM_USER_ID))
+    .innerJoin(organizationMembers, eq(projects.organizationId, organizationMembers.organizationId))
+    .where(eq(organizationMembers.userId, userId))
     .orderBy(desc(projects.createdAt))
+  return rows.map((r) => r.project)
 }
 
-/** Fetch a project by id with no ownership check (internal callers only). */
+/** Fetch a project by id with no ownership check (internal/agent callers only). */
 export async function getProjectInternal(ctx: AppContext, id: string): Promise<Project> {
   const [row] = await ctx.db.select().from(projects).where(eq(projects.id, id)).limit(1)
   if (row === undefined) {
@@ -21,23 +25,30 @@ export async function getProjectInternal(ctx: AppContext, id: string): Promise<P
   return row
 }
 
-export async function getProject(ctx: AppContext, id: string): Promise<Project> {
+/** Fetch a project the user can access (member of its org), else 404. */
+export async function getProject(ctx: AppContext, id: string, userId: string): Promise<Project> {
   const [row] = await ctx.db
-    .select()
+    .select({ project: projects })
     .from(projects)
-    .where(and(eq(projects.id, id), eq(projects.userId, SYSTEM_USER_ID)))
+    .innerJoin(organizationMembers, eq(projects.organizationId, organizationMembers.organizationId))
+    .where(and(eq(projects.id, id), eq(organizationMembers.userId, userId)))
     .limit(1)
   if (row === undefined) {
     throw notFound('Project')
   }
-  return row
+  return row.project
 }
 
-export async function createProject(ctx: AppContext, input: { name: string }): Promise<Project> {
+export async function createProject(
+  ctx: AppContext,
+  userId: string,
+  input: { name: string },
+): Promise<Project> {
+  const organizationId = await getDefaultOrgId(ctx, userId)
   const [created] = await ctx.db
     .insert(projects)
     .values({
-      userId: SYSTEM_USER_ID,
+      organizationId,
       name: input.name,
       provider: ctx.provider.kind,
       status: 'provisioning',
@@ -46,6 +57,10 @@ export async function createProject(ctx: AppContext, input: { name: string }): P
   if (created === undefined) {
     throw new HttpError(500, { error: 'internal_error', message: 'Failed to create project.' })
   }
+
+  // Every project starts with a `main` branch. Inert metadata today (it *is* the
+  // project's database); real per-branch databases land later.
+  await ctx.db.insert(branches).values({ projectId: created.id, name: 'main', isDefault: true })
 
   let provisioned: ProvisionedDatabase | undefined
   try {
@@ -81,8 +96,8 @@ export async function createProject(ctx: AppContext, input: { name: string }): P
   }
 }
 
-export async function deleteProject(ctx: AppContext, id: string): Promise<void> {
-  const project = await getProject(ctx, id)
+export async function deleteProject(ctx: AppContext, id: string, userId: string): Promise<void> {
+  const project = await getProject(ctx, id, userId)
   if (project.providerProjectId !== null) {
     try {
       await ctx.provider.destroy(project.providerProjectId)

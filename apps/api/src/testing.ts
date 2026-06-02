@@ -4,5 +4,12 @@
  * any runtime path.
  */
 export { createApp, type App, type AppOptions } from './app.ts'
+export {
+  createTestAuth,
+  TEST_AUTH_AUDIENCE,
+  TEST_AUTH_ISSUER,
+  type TestAuth,
+} from './auth/test-auth.ts'
+export type { AuthVerifier } from './auth/verify.ts'
 export { createContext, type AppContext, type OwnedContext } from './context.ts'
 export { ensureSeed } from './seed.ts'

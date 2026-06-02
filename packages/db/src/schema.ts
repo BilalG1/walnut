@@ -1,8 +1,12 @@
 import type { AgentScope, ProviderKind } from '@walnut/core'
-import { jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 
 export type ProjectStatus = 'provisioning' | 'active' | 'error'
 export type ScopeRequestStatus = 'pending' | 'approved' | 'denied'
+/** A member's role within an organization. Only `owner` is exercised today; the
+ * column exists so richer roles (admin/member) and invites slot in without a schema
+ * change. */
+export type OrgRole = 'owner' | 'admin' | 'member'
 /**
  * The resource a grant (or scope request) is anchored to. Only `project` exists
  * today; `org` and `branch` slot in when those entities land — the grant model is
@@ -19,11 +23,44 @@ export const users = pgTable('users', {
   createdAt,
 })
 
+/**
+ * An organization owns projects; users access projects through org membership.
+ * Every user gets a `personal` org on first login (see `provisionUser`); shared
+ * orgs + invites layer onto the same `organization_members` table later.
+ */
+export const organizations = pgTable('organizations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  isPersonal: boolean('is_personal').notNull().default(false),
+  /** For a personal org, the user it belongs to. Unique → at most one personal org
+   * per user (the JIT-provisioning idempotency key). Null for shared orgs, and
+   * Postgres allows many NULLs in a UNIQUE column, so they never collide. */
+  personalUserId: uuid('personal_user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .unique(),
+  createdAt,
+})
+
+export const organizationMembers = pgTable(
+  'organization_members',
+  {
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').$type<OrgRole>().notNull().default('member'),
+    createdAt,
+  },
+  (t) => [primaryKey({ columns: [t.organizationId, t.userId] })],
+)
+
 export const projects = pgTable('projects', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
+  organizationId: uuid('organization_id')
     .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
+    .references(() => organizations.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   provider: text('provider').$type<ProviderKind>().notNull(),
   /** Provider-side id used to destroy the database (Neon project id or local db name). */
@@ -35,6 +72,29 @@ export const projects = pgTable('projects', {
   error: text('error'),
   createdAt,
 })
+
+/**
+ * A line of a project's database. Every project gets one `main` branch on creation.
+ * Today this is inert metadata pointing at the project's single database — the
+ * `main` branch IS that database. Real branching (per-branch provisioned databases,
+ * agents scoped to a branch) lands later; this table reserves the vocabulary so the
+ * provider/role layer doesn't have to assume "one database per project forever"
+ * (see CLAUDE.md). No DB/role identity hangs off it yet.
+ */
+export const branches = pgTable(
+  'branches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** The branch a new agent/connection targets by default (the `main` branch). */
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt,
+  },
+  (t) => [unique('branches_project_name_unique').on(t.projectId, t.name)],
+)
 
 export const agents = pgTable('agents', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -95,6 +155,13 @@ export const scopeRequests = pgTable('scope_requests', {
 })
 
 export type User = typeof users.$inferSelect
+export type NewUser = typeof users.$inferInsert
+export type Organization = typeof organizations.$inferSelect
+export type NewOrganization = typeof organizations.$inferInsert
+export type OrganizationMember = typeof organizationMembers.$inferSelect
+export type NewOrganizationMember = typeof organizationMembers.$inferInsert
+export type Branch = typeof branches.$inferSelect
+export type NewBranch = typeof branches.$inferInsert
 export type Project = typeof projects.$inferSelect
 export type NewProject = typeof projects.$inferInsert
 export type Agent = typeof agents.$inferSelect

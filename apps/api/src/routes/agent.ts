@@ -1,5 +1,6 @@
 import { parseScopes } from '@walnut/core'
 import { Elysia, t } from 'elysia'
+import { extractBearer } from '../auth/bearer.ts'
 import type { AppContext } from '../context.ts'
 import { badRequest, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
@@ -7,15 +8,6 @@ import { findAgentByKey, getAgentGrant } from '../services/agents.ts'
 import { getProjectInternal } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
-
-function extractBearer(header: string | undefined): string | undefined {
-  if (header === undefined) {
-    return undefined
-  }
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim())
-  const token = match?.[1]?.trim()
-  return token !== undefined && token.length > 0 ? token : undefined
-}
 
 export function agentApiRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/agent/v1' })

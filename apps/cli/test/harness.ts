@@ -2,7 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { treaty } from '@elysiajs/eden'
-import { createApp, createContext, ensureSeed, type OwnedContext } from '@walnut/api/testing'
+import { createApp, createContext, createTestAuth, ensureSeed, type OwnedContext } from '@walnut/api/testing'
+import { SYSTEM_USER_ID } from '@walnut/core'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
@@ -38,6 +39,24 @@ async function ensureTestDatabase(): Promise<void> {
     }
   } finally {
     await admin.end({ timeout: 5 })
+  }
+}
+
+/** Reset the metadata schema so freshly regenerated migrations apply cleanly. */
+async function resetSchema(): Promise<void> {
+  const client = postgres(TEST_DB_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    // Evict any lingering sessions (e.g. a prior run still closing) so DROP SCHEMA
+    // can't block on their locks; the lock_timeout then fails fast instead of hanging.
+    await client.unsafe(
+      'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()',
+    )
+    await client.unsafe("SET lock_timeout = '15s'")
+    await client.unsafe('DROP SCHEMA IF EXISTS drizzle CASCADE')
+    await client.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
+    await client.unsafe('CREATE SCHEMA public')
+  } finally {
+    await client.end({ timeout: 5 })
   }
 }
 
@@ -103,6 +122,7 @@ export interface CliHarness {
 
 export async function createCliHarness(): Promise<CliHarness> {
   await ensureTestDatabase()
+  await resetSchema()
 
   const migrationHandle = openDb(TEST_DB_URL)
   try {
@@ -111,13 +131,20 @@ export async function createCliHarness(): Promise<CliHarness> {
     await migrationHandle.close()
   }
 
-  const ctx = createContext(TEST_DB_URL, {
-    kind: 'local',
-    localAdminUrl: ADMIN_URL,
-    localDbPrefix: DB_PREFIX,
-  })
+  const { verifier, mintToken } = await createTestAuth()
+  const ctx = createContext(
+    TEST_DB_URL,
+    {
+      kind: 'local',
+      localAdminUrl: ADMIN_URL,
+      localDbPrefix: DB_PREFIX,
+    },
+    verifier,
+  )
   const app = createApp(ctx)
-  const api = treaty(app)
+  // Dashboard calls (project/agent creation, scope approval) run as the seeded user.
+  const systemToken = await mintToken(SYSTEM_USER_ID, { email: 'system@walnut.cloud', name: 'System' })
+  const api = treaty(app, { headers: authHeader(systemToken) })
   const cliEntry = `${import.meta.dir}/../src/index.ts`
   const homeDir = await mkdtemp(join(tmpdir(), 'walnut-cli-home-'))
 
@@ -185,7 +212,7 @@ export async function createCliHarness(): Promise<CliHarness> {
   }
 
   async function reset(): Promise<void> {
-    await ctx.db.execute(sql`TRUNCATE TABLE users RESTART IDENTITY CASCADE`)
+    await ctx.db.execute(sql`TRUNCATE TABLE users, organizations RESTART IDENTITY CASCADE`)
     await ensureSeed(ctx)
     await deleteCredentials(homeDir)
   }

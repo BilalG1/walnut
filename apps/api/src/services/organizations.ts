@@ -1,0 +1,95 @@
+import { organizationMembers, organizations, users } from '@walnut/db'
+import { eq } from 'drizzle-orm'
+import type { AuthClaims } from '../auth/verify.ts'
+import type { AppContext } from '../context.ts'
+import { HttpError } from '../errors.ts'
+
+function internalError(message: string): HttpError {
+  return new HttpError(500, { error: 'internal_error', message })
+}
+
+/** Friendly name for a user's auto-created personal org. */
+function personalOrgName(claims: AuthClaims): string {
+  return claims.name ?? claims.email ?? 'Personal'
+}
+
+/**
+ * JIT-provision a verified user on first sight: ensure the user row, a personal
+ * organization, and an owner membership all exist. Idempotent and race-safe — the
+ * fast path is a single indexed membership lookup, so it's cheap to call on every
+ * authenticated request.
+ *
+ * Race safety: the personal org is keyed by `organizations.personal_user_id` (UNIQUE),
+ * so two concurrent first-logins can't create two personal orgs; the loser's
+ * `onConflictDoNothing` no-ops and it reads back the winner's row.
+ */
+export async function provisionUser(ctx: AppContext, claims: AuthClaims): Promise<void> {
+  const existing = await ctx.db
+    .select({ organizationId: organizationMembers.organizationId })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.userId, claims.userId))
+    .limit(1)
+  if (existing.length > 0) {
+    return
+  }
+
+  // Hexclave access tokens always carry an email; the fallback only guards a token
+  // that somehow lacks one, so `users.email` (NOT NULL) is never violated.
+  const email = claims.email ?? `${claims.userId}@users.noreply.hexclave`
+
+  await ctx.db.transaction(async (tx) => {
+    await tx
+      .insert(users)
+      .values({ id: claims.userId, email })
+      .onConflictDoUpdate({ target: users.id, set: { email } })
+
+    const inserted = await tx
+      .insert(organizations)
+      .values({ name: personalOrgName(claims), isPersonal: true, personalUserId: claims.userId })
+      .onConflictDoNothing({ target: organizations.personalUserId })
+      .returning({ id: organizations.id })
+
+    let orgId = inserted[0]?.id
+    if (orgId === undefined) {
+      const [row] = await tx
+        .select({ id: organizations.id })
+        .from(organizations)
+        .where(eq(organizations.personalUserId, claims.userId))
+        .limit(1)
+      orgId = row?.id
+    }
+    if (orgId === undefined) {
+      throw internalError('Failed to provision personal organization.')
+    }
+
+    await tx
+      .insert(organizationMembers)
+      .values({ organizationId: orgId, userId: claims.userId, role: 'owner' })
+      .onConflictDoNothing()
+  })
+}
+
+/**
+ * The org a new project is created in for this user. MVP: their personal org (every
+ * user has exactly one). When org switching lands, the caller passes an explicit org
+ * id instead and this becomes the fallback.
+ */
+export async function getDefaultOrgId(ctx: AppContext, userId: string): Promise<string> {
+  const [personal] = await ctx.db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.personalUserId, userId))
+    .limit(1)
+  if (personal !== undefined) {
+    return personal.id
+  }
+  const [membership] = await ctx.db
+    .select({ id: organizationMembers.organizationId })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.userId, userId))
+    .limit(1)
+  if (membership === undefined) {
+    throw internalError('User has no organization.')
+  }
+  return membership.id
+}

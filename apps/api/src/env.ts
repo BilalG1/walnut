@@ -1,10 +1,18 @@
 import type { ProviderConfig, ProviderKind } from '@walnut/core'
 
+export interface AuthEnv {
+  /** Hexclave project id; also the access-token audience. */
+  projectId: string
+  /** Hexclave API base, e.g. `https://api.hexclave.com`. */
+  apiBaseUrl: string
+}
+
 export interface Env {
   port: number
   databaseUrl: string
   corsOrigins: string[]
   provider: ProviderConfig
+  auth: AuthEnv
 }
 
 function required(name: string): string {
@@ -32,6 +40,10 @@ export function loadEnv(): Env {
       kind: providerKind,
       localAdminUrl: process.env.LOCAL_PG_ADMIN_URL,
       neonApiKey: process.env.NEON_API_KEY,
+    },
+    auth: {
+      projectId: required('HEXCLAVE_PROJECT_ID'),
+      apiBaseUrl: process.env.HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com',
     },
   }
 }

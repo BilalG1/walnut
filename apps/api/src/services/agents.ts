@@ -33,8 +33,12 @@ async function grantsByAgent(ctx: AppContext, agentIds: string[]): Promise<Map<s
   return byAgent
 }
 
-export async function listAgents(ctx: AppContext, projectId: string): Promise<AgentWithGrants[]> {
-  await getProject(ctx, projectId)
+export async function listAgents(
+  ctx: AppContext,
+  projectId: string,
+  userId: string,
+): Promise<AgentWithGrants[]> {
+  await getProject(ctx, projectId, userId)
   const rows = await ctx.db
     .select()
     .from(agents)
@@ -55,9 +59,10 @@ export interface CreatedAgent extends AgentWithGrants {
 export async function createAgent(
   ctx: AppContext,
   projectId: string,
+  userId: string,
   input: { name: string },
 ): Promise<CreatedAgent> {
-  const project = await getProject(ctx, projectId)
+  const project = await getProject(ctx, projectId, userId)
   if (project.connectionUri === null) {
     throw new HttpError(409, {
       error: 'project_not_ready',
@@ -111,19 +116,19 @@ async function rollbackAgentRole(ownerUri: string, role: string): Promise<void> 
   })
 }
 
-export async function getAgent(ctx: AppContext, id: string): Promise<AgentWithGrants> {
+export async function getAgent(ctx: AppContext, id: string, userId: string): Promise<AgentWithGrants> {
   const [row] = await ctx.db.select().from(agents).where(eq(agents.id, id)).limit(1)
   if (row === undefined) {
     throw notFound('Agent')
   }
   // Confirm the agent's project belongs to the caller.
-  await getProject(ctx, row.projectId)
+  await getProject(ctx, row.projectId, userId)
   const grants = await ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, id))
   return { agent: row, grants }
 }
 
-export async function deleteAgent(ctx: AppContext, id: string): Promise<void> {
-  const { agent, grants } = await getAgent(ctx, id)
+export async function deleteAgent(ctx: AppContext, id: string, userId: string): Promise<void> {
+  const { agent, grants } = await getAgent(ctx, id, userId)
   for (const grant of grants) {
     if (grant.dbRole === null) {
       continue

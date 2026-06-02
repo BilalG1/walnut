@@ -1,8 +1,10 @@
 import { treaty } from '@elysiajs/eden'
+import { SYSTEM_USER_ID } from '@walnut/core'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { createApp } from '../src/app.ts'
+import { createTestAuth, type TestAuth } from '../src/auth/test-auth.ts'
 import { createContext, type OwnedContext } from '../src/context.ts'
 import { ensureSeed } from '../src/seed.ts'
 
@@ -17,6 +19,12 @@ function withDatabase(adminUrl: string, db: string): string {
 
 const TEST_DB_URL = withDatabase(ADMIN_URL, TEST_DB)
 
+type ApiClient = ReturnType<typeof treaty<ReturnType<typeof createApp>>>
+
+function bearerHeaders(token: string): { authorization: string } {
+  return { authorization: `Bearer ${token}` }
+}
+
 async function ensureTestDatabase(): Promise<void> {
   const admin = postgres(ADMIN_URL, { max: 1, prepare: false })
   try {
@@ -26,6 +34,25 @@ async function ensureTestDatabase(): Promise<void> {
     }
   } finally {
     await admin.end({ timeout: 5 })
+  }
+}
+
+/** Reset the metadata schema to a clean slate so freshly regenerated migrations
+ * apply without colliding with a prior run's tables/migration journal. */
+async function resetSchema(): Promise<void> {
+  const client = postgres(TEST_DB_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    // Evict any lingering sessions (e.g. a prior run still closing) so DROP SCHEMA
+    // can't block on their locks; the lock_timeout then fails fast instead of hanging.
+    await client.unsafe(
+      'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()',
+    )
+    await client.unsafe("SET lock_timeout = '15s'")
+    await client.unsafe('DROP SCHEMA IF EXISTS drizzle CASCADE')
+    await client.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
+    await client.unsafe('CREATE SCHEMA public')
+  } finally {
+    await client.end({ timeout: 5 })
   }
 }
 
@@ -64,13 +91,19 @@ async function dropProjectDatabases(): Promise<void> {
 
 export interface Harness {
   ctx: OwnedContext
-  api: ReturnType<typeof treaty<ReturnType<typeof createApp>>>
+  /** Dashboard client pre-authed as the seeded system user. */
+  api: ApiClient
+  /** Mint a Hexclave-shaped access token for any user id (exercises real verification). */
+  mintToken: TestAuth['mintToken']
+  /** A dashboard client authed as the given user — for multi-user isolation tests. */
+  clientFor: (userId: string, claims?: { email?: string; name?: string }) => Promise<ApiClient>
   reset: () => Promise<void>
   dispose: () => Promise<void>
 }
 
 export async function createHarness(): Promise<Harness> {
   await ensureTestDatabase()
+  await resetSchema()
 
   const migrationHandle = openDb(TEST_DB_URL)
   try {
@@ -79,12 +112,25 @@ export async function createHarness(): Promise<Harness> {
     await migrationHandle.close()
   }
 
-  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL })
+  const { verifier, mintToken } = await createTestAuth()
+  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL }, verifier)
   const app = createApp(ctx)
-  const api = treaty(app)
+
+  // Every request from `api` is authed as the seeded system user, so existing tests
+  // (which don't pass auth) keep working. Per-call headers (agent keys) override this.
+  const systemToken = await mintToken(SYSTEM_USER_ID, { email: 'system@walnut.cloud', name: 'System' })
+  const api: ApiClient = treaty(app, { headers: bearerHeaders(systemToken) })
+
+  async function clientFor(
+    userId: string,
+    claims: { email?: string; name?: string } = {},
+  ): Promise<ApiClient> {
+    const token = await mintToken(userId, claims)
+    return treaty(app, { headers: bearerHeaders(token) })
+  }
 
   async function reset(): Promise<void> {
-    await ctx.db.execute(sql`TRUNCATE TABLE users RESTART IDENTITY CASCADE`)
+    await ctx.db.execute(sql`TRUNCATE TABLE users, organizations RESTART IDENTITY CASCADE`)
     await ensureSeed(ctx)
   }
 
@@ -93,5 +139,5 @@ export async function createHarness(): Promise<Harness> {
     await dropProjectDatabases()
   }
 
-  return { ctx, api, reset, dispose }
+  return { ctx, api, mintToken, clientFor, reset, dispose }
 }

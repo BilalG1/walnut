@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
-import { agentGrants } from '@walnut/db'
+import { agentGrants, organizationMembers, organizations } from '@walnut/db'
 import { eq } from 'drizzle-orm'
 import { createHarness, type Harness } from './harness.ts'
 
@@ -423,6 +423,61 @@ describe('scope requests', () => {
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:write'] }, { headers: auth })
     const list = await h.api.agent.v1['scope-requests'].get({ headers: auth })
     expect(list.data?.length).toBe(2)
+  })
+})
+
+describe('auth and org isolation', () => {
+  const USER_A = '11111111-1111-1111-1111-111111111111'
+  const USER_B = '22222222-2222-2222-2222-222222222222'
+
+  test('a request with no bearer token is 401', async () => {
+    // `Bearer ` (no token) overrides the harness's default auth header.
+    const res = await h.api.api.projects.get({ headers: { authorization: 'Bearer ' } })
+    expect(res.status).toBe(401)
+  })
+
+  test('a request with a garbage token is 401', async () => {
+    const res = await h.api.api.projects.get({ headers: { authorization: 'Bearer not-a-jwt' } })
+    expect(res.status).toBe(401)
+  })
+
+  test("a user cannot see or fetch another user's project", async () => {
+    const alice = await h.clientFor(USER_A, { email: 'alice@example.com' })
+    const bob = await h.clientFor(USER_B, { email: 'bob@example.com' })
+
+    const created = await alice.api.projects.post({ name: 'alice-db' })
+    const projectId = created.data?.id
+    if (projectId === undefined) throw new Error('alice failed to create project')
+
+    // Bob's list is empty and he can't fetch Alice's project by id.
+    const bobList = await bob.api.projects.get()
+    expect(bobList.data).toEqual([])
+    const bobFetch = await bob.api.projects({ id: projectId }).get()
+    expect(bobFetch.status).toBe(404)
+
+    // Alice still sees exactly her own project.
+    const aliceList = await alice.api.projects.get()
+    expect(aliceList.data?.length).toBe(1)
+    expect(aliceList.data?.[0]?.id).toBe(projectId)
+  })
+
+  test('first login provisions a personal org with an owner membership', async () => {
+    const carol = await h.clientFor(USER_A, { email: 'carol@example.com' })
+    // Any authenticated call triggers JIT provisioning.
+    await carol.api.projects.get()
+
+    const members = await h.ctx.db
+      .select()
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, USER_A))
+    expect(members.length).toBe(1)
+    expect(members[0]?.role).toBe('owner')
+
+    const [org] = await h.ctx.db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.personalUserId, USER_A))
+    expect(org?.isPersonal).toBe(true)
   })
 })
 
