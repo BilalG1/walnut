@@ -1,5 +1,6 @@
 import { Badge, Card } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useProject } from '../../data/queries.ts'
 
 /** Project/branch home. Minimal for now — activity + richer stats land in a later pass. */
@@ -15,14 +16,14 @@ function OverviewView({ projectId, branch }: { projectId: string; branch: string
   const { data: project, error } = useProject(projectId)
   if (error !== null) {
     return (
-      <div className="p-8">
+      <PageContainer>
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="mt-2 text-sm text-red-400">{error.message}</p>
-      </div>
+      </PageContainer>
     )
   }
   return (
-    <div className="p-8">
+    <PageContainer>
       <div className="flex items-center gap-2.5">
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <Badge tone="neutral">
@@ -37,7 +38,7 @@ function OverviewView({ projectId, branch }: { projectId: string; branch: string
         <Stat label="Region" value={project?.region ?? '—'} />
         <Stat label="Branch" value={branch} />
       </div>
-    </div>
+    </PageContainer>
   )
 }
 

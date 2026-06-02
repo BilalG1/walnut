@@ -2,6 +2,7 @@ import { Copy } from '@walnut/icons'
 import { Button, Card, Spinner } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useProject } from '../../data/queries.ts'
 import { maskConnectionUri } from '../../lib/format.ts'
 
@@ -28,7 +29,7 @@ function DatabaseView({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Database</h1>
       <p className="mt-1 text-sm text-neutral-500">The owner connection for this branch's Postgres database.</p>
 
@@ -58,6 +59,6 @@ function DatabaseView({ projectId }: { projectId: string }) {
           </Card>
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }

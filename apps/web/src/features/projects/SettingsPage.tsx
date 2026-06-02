@@ -2,6 +2,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Button, Card, Dialog } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useDeleteProject, useProject } from '../../data/queries.ts'
 
 export function ProjectSettingsPage() {
@@ -28,7 +29,7 @@ function SettingsView({ orgId, projectId }: { orgId: string; projectId: string }
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       <p className="mt-1 text-sm text-neutral-500">Branch settings for {project?.name ?? 'this project'}.</p>
 
@@ -63,6 +64,6 @@ function SettingsView({ orgId, projectId }: { orgId: string; projectId: string }
         </p>
         {del.error !== null ? <p className="mt-2 text-xs text-red-400">{del.error.message}</p> : null}
       </Dialog>
-    </div>
+    </PageContainer>
   )
 }

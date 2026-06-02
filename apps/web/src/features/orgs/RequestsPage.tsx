@@ -1,5 +1,6 @@
 import { Badge, Button, Card, Spinner } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useOrgAgents, useOrgRequests, useResolveRequest } from '../../data/queries.ts'
 import { scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
@@ -23,7 +24,7 @@ function RequestsView({ orgId }: { orgId: string }) {
   const rows = requests.data ?? []
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
       <p className="mt-1 text-sm text-neutral-500">Access agents have asked for, across every project in this organization.</p>
 
@@ -74,6 +75,6 @@ function RequestsView({ orgId }: { orgId: string }) {
           })
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }

@@ -3,6 +3,7 @@ import { Plus } from '@walnut/icons'
 import { Badge, Button, Card, Input, Spinner } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useCreateProject, useOrgProjects } from '../../data/queries.ts'
 import { statusTone } from '../../lib/tones.ts'
 
@@ -32,7 +33,7 @@ function ProjectsView({ orgId }: { orgId: string }) {
   const rows = projects.data ?? []
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
       <p className="mt-1 text-sm text-neutral-500">
         Open a project to work on its database — each opens on its <span className="font-mono">main</span> branch.
@@ -107,6 +108,6 @@ function ProjectsView({ orgId }: { orgId: string }) {
           </div>
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }

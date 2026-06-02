@@ -1,5 +1,6 @@
 import { Badge, type BadgeTone, Card, Spinner } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useActivity } from '../../data/queries.ts'
 import { scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
@@ -24,7 +25,7 @@ function ActivityView({ projectId }: { projectId: string }) {
   const rows = data ?? []
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
       <p className="mt-1 text-sm text-neutral-500">Every query agents have run against this database — allowed and denied.</p>
 
@@ -64,6 +65,6 @@ function ActivityView({ projectId }: { projectId: string }) {
           </Card>
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }

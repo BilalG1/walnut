@@ -2,6 +2,7 @@ import { Plus } from '@walnut/icons'
 import { Avatar, Badge, Button, Card, Spinner } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
+import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import { useOrgAgents, useOrgProjects } from '../../data/queries.ts'
 import { scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
@@ -26,7 +27,7 @@ function AgentsView({ orgId }: { orgId: string }) {
     .map((p) => ({ id: p.id, name: p.name }))
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <PageContainer>
       <div className="flex items-start gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
@@ -94,6 +95,6 @@ function AgentsView({ orgId }: { orgId: string }) {
           </Card>
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }
