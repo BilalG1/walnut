@@ -1,8 +1,10 @@
 import type { AgentScope, ProviderKind } from '@walnut/core'
-import { boolean, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 
 export type ProjectStatus = 'provisioning' | 'active' | 'error'
 export type ScopeRequestStatus = 'pending' | 'approved' | 'denied'
+/** Outcome of an agent query attempt: ran, blocked by scope, or errored at the engine. */
+export type QueryEventStatus = 'ok' | 'denied' | 'error'
 /** A member's role within an organization. Only `owner` is exercised today; the
  * column exists so richer roles (admin/member) and invites slot in without a schema
  * change. */
@@ -154,6 +156,31 @@ export const scopeRequests = pgTable('scope_requests', {
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
 })
 
+/**
+ * An audit record of every agent query attempt — the dashboard's activity/oversight
+ * feed. Captures what ran (or was blocked), under which scopes, and the outcome.
+ * `sql` is stored verbatim (truncated by the caller); a denied attempt records no
+ * command/rowCount since nothing executed.
+ */
+export const queryEvents = pgTable('query_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  sql: text('sql').notNull(),
+  /** Postgres command tag (SELECT/INSERT/…) when the query ran; null otherwise. */
+  command: text('command'),
+  requiredScopes: jsonb('required_scopes').$type<string[]>().notNull().default([]),
+  status: text('status').$type<QueryEventStatus>().notNull(),
+  rowCount: integer('row_count'),
+  errorMessage: text('error_message'),
+  durationMs: integer('duration_ms'),
+  createdAt,
+})
+
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Organization = typeof organizations.$inferSelect
@@ -170,3 +197,5 @@ export type AgentGrant = typeof agentGrants.$inferSelect
 export type NewAgentGrant = typeof agentGrants.$inferInsert
 export type ScopeRequest = typeof scopeRequests.$inferSelect
 export type NewScopeRequest = typeof scopeRequests.$inferInsert
+export type QueryEvent = typeof queryEvents.$inferSelect
+export type NewQueryEvent = typeof queryEvents.$inferInsert

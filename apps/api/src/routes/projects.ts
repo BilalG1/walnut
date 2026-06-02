@@ -1,7 +1,8 @@
 import { Elysia, t } from 'elysia'
 import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
-import { toAgentView, toBranchView, toProjectDetail, toProjectSummary } from '../serializers.ts'
+import { toActivityEventView, toAgentView, toBranchView, toProjectDetail, toProjectSummary } from '../serializers.ts'
+import { listProjectActivity } from '../services/activity.ts'
 import { createAgent, listAgents } from '../services/agents.ts'
 import { createProject, deleteProject, getProject, listBranches, listProjects } from '../services/projects.ts'
 
@@ -35,6 +36,10 @@ export function projectRoutes(ctx: AppContext) {
     .get('/:id/branches', async ({ userId, params }) => {
       const rows = await listBranches(ctx, params.id, userId)
       return rows.map(toBranchView)
+    })
+    .get('/:id/activity', async ({ userId, params }) => {
+      const rows = await listProjectActivity(ctx, params.id, userId)
+      return rows.map((r) => toActivityEventView(r.event, r.agentName))
     })
     .post(
       '/:id/agents',

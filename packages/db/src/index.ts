@@ -8,10 +8,12 @@ export {
   agents,
   agentGrants,
   scopeRequests,
+  queryEvents,
 } from './schema.ts'
 export type {
   ProjectStatus,
   ScopeRequestStatus,
+  QueryEventStatus,
   GrantResourceType,
   OrgRole,
   User,
@@ -30,6 +32,8 @@ export type {
   NewAgentGrant,
   ScopeRequest,
   NewScopeRequest,
+  QueryEvent,
+  NewQueryEvent,
 } from './schema.ts'
 export { openDb } from './client.ts'
 export type { Database, DbHandle, Schema } from './client.ts'

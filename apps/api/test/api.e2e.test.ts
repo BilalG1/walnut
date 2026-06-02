@@ -770,3 +770,31 @@ describe('branches', () => {
     expect(res.status).toBe(404)
   })
 })
+
+describe('activity', () => {
+  test('agent queries (allowed and denied) are recorded in project activity', async () => {
+    const project = await newProject('act')
+    const agent = await newAgent(project.id, 'act-bot')
+
+    // A denied attempt first (no scopes yet; SELECT needs db:read), then grant + run.
+    const denied = await h.api.agent.v1.query.post({ sql: 'select 1' }, { headers: bearer(agent.apiKey) })
+    expect(denied.status).toBe(403)
+    await grant(agent.apiKey, project.id, ['db:read'])
+    const ok = await h.api.agent.v1.query.post({ sql: 'select 1 as x' }, { headers: bearer(agent.apiKey) })
+    expect(ok.status).toBe(200)
+
+    const res = await h.api.api.projects({ id: project.id }).activity.get()
+    expect(res.status).toBe(200)
+    const statuses = (res.data ?? []).map((e) => e.status)
+    expect(statuses).toContain('ok')
+    expect(statuses).toContain('denied')
+    expect(res.data?.find((e) => e.status === 'ok')?.agentName).toBe('act-bot')
+  })
+
+  test('activity of an inaccessible project is 404', async () => {
+    const project = await newProject('act2')
+    const stranger = await h.clientFor('55555555-5555-5555-5555-555555555555', { email: 'stranger5@example.com' })
+    const res = await stranger.api.projects({ id: project.id }).activity.get()
+    expect(res.status).toBe(404)
+  })
+})

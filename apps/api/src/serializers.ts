@@ -1,5 +1,5 @@
 import { parseScopes } from '@walnut/core'
-import type { Agent, AgentGrant, Branch, Organization, Project, ScopeRequest } from '@walnut/db'
+import type { Agent, AgentGrant, Branch, Organization, Project, QueryEvent, ScopeRequest } from '@walnut/db'
 
 export interface ProjectSummary {
   id: string
@@ -135,4 +135,35 @@ export interface BranchView {
 
 export function toBranchView(b: Branch): BranchView {
   return { id: b.id, name: b.name, isDefault: b.isDefault, createdAt: b.createdAt.toISOString() }
+}
+
+/** One agent query attempt, as shown in the project activity feed. */
+export interface ActivityEventView {
+  id: string
+  agentId: string
+  agentName: string
+  sql: string
+  command: string | null
+  requiredScopes: string[]
+  status: string
+  rowCount: number | null
+  errorMessage: string | null
+  durationMs: number | null
+  createdAt: string
+}
+
+export function toActivityEventView(event: QueryEvent, agentName: string): ActivityEventView {
+  return {
+    id: event.id,
+    agentId: event.agentId,
+    agentName,
+    sql: event.sql,
+    command: event.command,
+    requiredScopes: event.requiredScopes,
+    status: event.status,
+    rowCount: event.rowCount,
+    errorMessage: event.errorMessage,
+    durationMs: event.durationMs,
+    createdAt: event.createdAt.toISOString(),
+  }
 }
