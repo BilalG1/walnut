@@ -23,7 +23,12 @@ export function TopBar() {
           <Bell size={18} />
         </Link>
       ) : null}
-      <Menu align="end" triggerLabel="Account menu" triggerClassName="rounded-full" trigger={<Avatar label={label} size={28} />}>
+      <Menu
+        align="end"
+        triggerLabel="Account menu"
+        triggerClassName="p-1 transition-colors hover:bg-neutral-800"
+        trigger={<Avatar label={label} size={26} />}
+      >
         <MenuLabel>{label}</MenuLabel>
         <MenuSeparator />
         <MenuItem onSelect={signOut}>
