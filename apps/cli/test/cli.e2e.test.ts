@@ -20,12 +20,13 @@ function parse(s: string): any {
 }
 
 describe('whoami', () => {
-  test('returns identity + project, exit 0', async () => {
-    const { projectId, key } = await h.makeAgent()
+  test('returns identity; a grant-less agent has an org but no project yet, exit 0', async () => {
+    const { key } = await h.makeAgent()
     const r = await h.run(['whoami'], { key })
     expect(r.code).toBe(0)
     const out = parse(r.stdout)
-    expect(out.project.id).toBe(projectId)
+    expect(typeof out.organization.id).toBe('string')
+    expect(out.project).toBeNull()
     expect(out.scopes).toEqual([])
   })
 
@@ -47,14 +48,14 @@ describe('whoami', () => {
 
 describe('login / logout', () => {
   test('login stores credentials that later commands use, then logout clears them', async () => {
-    const { projectId, key } = await h.makeAgent()
+    const { projectId, key } = await h.makeAgent({ scopes: ['db:read'] })
 
     const loggedIn = await h.run(['login', '--api-key', key])
     expect(loggedIn.code).toBe(0)
     expect(parse(loggedIn.stdout).loggedIn).toBe(true)
     expect((await readCredentials(h.homeDir))?.apiKey).toBe(key)
 
-    // whoami with no flag now resolves the stored key.
+    // whoami with no flag now resolves the stored key; the granted agent shows its project.
     const who = await h.run(['whoami'])
     expect(who.code).toBe(0)
     expect(parse(who.stdout).project.id).toBe(projectId)

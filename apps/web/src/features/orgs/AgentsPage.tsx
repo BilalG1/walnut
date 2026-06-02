@@ -3,7 +3,7 @@ import { Avatar, Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
-import { useOrgAgents, useOrgProjects } from '../../data/queries.ts'
+import { useOrgAgents } from '../../data/queries.ts'
 import { scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
 import { CreateAgentDialog } from './CreateAgentDialog.tsx'
@@ -19,12 +19,8 @@ export function AgentsPage() {
 
 function AgentsView({ orgId }: { orgId: string }) {
   const { data, isPending, error } = useOrgAgents(orgId)
-  const projects = useOrgProjects(orgId)
   const [createOpen, setCreateOpen] = useState(false)
   const rows = data ?? []
-  const activeProjects = (projects.data ?? [])
-    .filter((p) => p.status === 'active')
-    .map((p) => ({ id: p.id, name: p.name }))
 
   return (
     <PageContainer>
@@ -41,7 +37,7 @@ function AgentsView({ orgId }: { orgId: string }) {
         </Button>
       </div>
 
-      <CreateAgentDialog orgId={orgId} projects={activeProjects} open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CreateAgentDialog orgId={orgId} open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <div className="mt-6">
         {isPending ? (

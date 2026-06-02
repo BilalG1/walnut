@@ -95,8 +95,9 @@ async function assertResourceInOrg(
 export interface ScopeRequestInput {
   scopes: string[]
   reason?: string
-  /** Target resource. Both must be supplied together; omit to default to the agent's
-   * single project (it errors if the agent can reach zero or several). */
+  /** Target resource. Both must be supplied together; omit to default to the agent's sole
+   * project — its single granted project, or the org's sole project if it has none yet
+   * (it errors if there are zero or several to choose from). */
   resourceType?: GrantResourceType
   resourceId?: string
 }

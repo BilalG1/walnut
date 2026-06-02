@@ -76,12 +76,13 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 
 ## The agent model (the point of the project)
 
-- **Agents** belong to an **organization** (`agents.organization_id`), created homed on a
-  project (where they get an initial zero-scope grant) and able to hold/request access to any
-  project in the org. They authenticate to the agent-facing API with a bearer key (`/agent/v1/*`);
-  only a SHA-256 hash is stored. The agent CLI (`apps/cli`) targets a project with `--project`
-  (defaulting to the agent's sole project, erroring `ambiguous_project` if several) and discovers
-  ids via `walnut project ls`.
+- **Agents** belong to an **organization** (`agents.organization_id`), created at the org level
+  (`POST /api/organizations/:orgId/agents`) and **born with zero grants** — they request access to
+  any project (or branch) in the org, and a scoped Postgres role is provisioned on first approval.
+  They authenticate to the agent-facing API with a bearer key (`/agent/v1/*`); only a SHA-256 hash
+  is stored. The agent CLI (`apps/cli`) targets a project with `--project` (defaulting to the
+  agent's sole project, or the org's sole project when it has no grants yet; erroring
+  `ambiguous_project` if several) and discovers ids via `walnut project ls`.
 - **Scopes** are strings, currently DB-only: `db:read`, `db:write`, `db:delete`, `db:ddl`
   (defined in `packages/core/src/scopes.ts`). The union type is deliberately open so future
   domains (`fn:deploy`, `email:send`, `logs:read`) drop in without a schema change. A grant is

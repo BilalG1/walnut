@@ -37,8 +37,10 @@ async function newProject(name = 'proj'): Promise<{ id: string }> {
   return res.data
 }
 
-async function newAgent(projectId: string, name = 'agent'): Promise<{ id: string; apiKey: string }> {
-  const res = await h.api.api.projects({ id: projectId }).agents.post({ name })
+/** Create a grant-less agent in the seeded user's personal org. */
+async function newAgent(name = 'agent'): Promise<{ id: string; apiKey: string }> {
+  const orgId = await personalOrgId()
+  const res = await h.api.api.organizations({ orgId }).agents.post({ name })
   if (res.data === null) {
     throw new Error(`createAgent failed: ${JSON.stringify(res.error?.value)}`)
   }
@@ -98,9 +100,9 @@ describe('projects', () => {
 })
 
 describe('agents', () => {
-  test('POST /api/projects/:id/agents creates an agent with no scopes and a key', async () => {
-    const project = await newProject()
-    const res = await h.api.api.projects({ id: project.id }).agents.post({ name: 'bot' })
+  test('POST /api/organizations/:orgId/agents creates an agent with no scopes and a key', async () => {
+    const orgId = await personalOrgId()
+    const res = await h.api.api.organizations({ orgId }).agents.post({ name: 'bot' })
     expect(res.status).toBe(200)
     expect(res.data?.name).toBe('bot')
     expect(res.data?.scopes).toEqual([])
@@ -108,24 +110,15 @@ describe('agents', () => {
     expect(res.data?.keyPrefix.startsWith('wln_agt_')).toBe(true)
   })
 
-  test('creating an agent under an unknown project is 404', async () => {
-    const res = await h.api.api
-      .projects({ id: '00000000-0000-0000-0000-0000000000ff' })
-      .agents.post({ name: 'bot' })
+  test('creating an agent in an org the caller is not a member of is 404', async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('77777777-7777-7777-7777-777777777777', { email: 'stranger7@example.com' })
+    const res = await stranger.api.organizations({ orgId }).agents.post({ name: 'bot' })
     expect(res.status).toBe(404)
   })
 
-  test('GET /api/projects/:id/agents lists agents', async () => {
-    const project = await newProject()
-    await newAgent(project.id, 'one')
-    await newAgent(project.id, 'two')
-    const res = await h.api.api.projects({ id: project.id }).agents.get()
-    expect(res.data?.length).toBe(2)
-  })
-
   test('GET /api/agents/:id returns the agent without its key', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     const res = await h.api.api.agents({ id: agent.id }).get()
     expect(res.data?.id).toBe(agent.id)
     expect(res.data?.keyPrefix.startsWith('wln_agt_')).toBe(true)
@@ -133,35 +126,32 @@ describe('agents', () => {
   })
 
   test('DELETE /api/agents/:id removes the agent', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     const del = await h.api.api.agents({ id: agent.id }).delete()
     expect(del.data).toEqual({ deleted: true })
     const after = await h.api.api.agents({ id: agent.id }).get()
     expect(after.status).toBe(404)
   })
 
-  // Grants are the normalized source of truth for an agent's scopes + scoped role.
-  test('creating an agent provisions exactly one project-anchored grant', async () => {
+  test('an agent is born with zero grants (a role is provisioned lazily on first approval)', async () => {
+    const agent = await newAgent()
+    const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
+    expect(grants.length).toBe(0)
+  })
+
+  test('approving the first scope request creates the grant + scoped role', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
     const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
     expect(grants.length).toBe(1)
     const g = grants[0]
     expect(g?.resourceType).toBe('project')
     expect(g?.resourceId).toBe(project.id)
-    expect(g?.scopes).toEqual([])
+    expect(g?.scopes).toEqual(['db:read', 'db:write'])
     expect(typeof g?.dbRole).toBe('string')
     expect(g?.connectionUri ?? '').toContain('postgres')
-  })
-
-  test('approving a scope request writes the scopes onto the grant', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
-    await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
-    const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
-    expect(grants[0]?.scopes).toEqual(['db:read', 'db:write'])
-  })
+  }, 20_000)
 })
 
 describe('agent API authentication', () => {
@@ -175,20 +165,25 @@ describe('agent API authentication', () => {
     expect(res.status).toBe(401)
   })
 
-  test('GET /agent/v1/identity returns scopes and project', async () => {
+  test('GET /agent/v1/identity has no project until granted, then reports it', async () => {
     const project = await newProject('identity')
-    const agent = await newAgent(project.id, 'ident-bot')
-    const res = await h.api.agent.v1.identity.get({ headers: bearer(agent.apiKey) })
-    expect(res.data?.id).toBe(agent.id)
-    expect(res.data?.scopes).toEqual([])
-    expect(res.data?.project?.id).toBe(project.id)
-  })
+    const agent = await newAgent('ident-bot')
+    const before = await h.api.agent.v1.identity.get({ headers: bearer(agent.apiKey) })
+    expect(before.data?.id).toBe(agent.id)
+    expect(before.data?.scopes).toEqual([])
+    expect(before.data?.project).toBeNull()
+
+    await grant(agent.apiKey, project.id, ['db:read'])
+    const after = await h.api.agent.v1.identity.get({ headers: bearer(agent.apiKey) })
+    expect(after.data?.project?.id).toBe(project.id)
+    expect(after.data?.scopes).toEqual(['db:read'])
+  }, 20_000)
 })
 
 describe('agent query scope enforcement', () => {
   test('reading without db:read is denied with a clear message', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const res = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: bearer(agent.apiKey) })
     expect(res.status).toBe(403)
     const body = res.error?.value as ErrorBody | undefined
@@ -197,15 +192,15 @@ describe('agent query scope enforcement', () => {
   })
 
   test('an empty statement is rejected', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const res = await h.api.agent.v1.query.post({ sql: '   ' }, { headers: bearer(agent.apiKey) })
     expect(res.status).toBe(400)
   })
 
   test('a read-only agent cannot smuggle DDL via a multi-statement batch', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read'])
     const res = await h.api.agent.v1.query.post(
       { sql: 'SELECT 1; DROP TABLE IF EXISTS secrets' },
@@ -218,7 +213,7 @@ describe('agent query scope enforcement', () => {
 
   test('a read-only agent cannot delete via EXPLAIN ANALYZE', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     const auth = bearer(agent.apiKey)
     await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
     // Seed a table with a row using the privileged grant.
@@ -226,7 +221,7 @@ describe('agent query scope enforcement', () => {
     await h.api.agent.v1.query.post({ sql: 'INSERT INTO t VALUES (1)' }, { headers: auth })
 
     // A second, read-only agent must not be able to run EXPLAIN ANALYZE DELETE.
-    const reader = await newAgent(project.id, 'reader')
+    const reader = await newAgent('reader')
     await grant(reader.apiKey, project.id, ['db:read'])
     const res = await h.api.agent.v1.query.post(
       { sql: 'EXPLAIN ANALYZE DELETE FROM t' },
@@ -243,7 +238,7 @@ describe('agent query scope enforcement', () => {
 
   test('granting scopes enables the full read/write/ddl lifecycle', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     const auth = bearer(agent.apiKey)
     await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
 
@@ -266,7 +261,7 @@ describe('agent query scope enforcement', () => {
 
   test('writing without db:write is denied even with db:read', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read'])
     const res = await h.api.agent.v1.query.post(
       { sql: "INSERT INTO whatever (x) VALUES (1)" },
@@ -279,7 +274,7 @@ describe('agent query scope enforcement', () => {
 
   test('a SQL error surfaces as a 400 query_error', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read'])
     const res = await h.api.agent.v1.query.post(
       { sql: 'SELECT * FROM table_that_does_not_exist' },
@@ -298,7 +293,7 @@ describe('database-level role enforcement', () => {
   // restricted role lacks CREATE — see the large-object test for that engine backstop).
   test('SELECT ... INTO is classified as DDL and denied for a read-only agent', async () => {
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read'])
 
     const res = await h.api.agent.v1.query.post(
@@ -322,7 +317,7 @@ describe('database-level role enforcement', () => {
     // `SELECT lo_create(...)` classifies as db:read but writes a large object — the
     // role lockdown revokes the LO write functions from PUBLIC, so the engine refuses it.
     const project = await newProject()
-    const agent = await newAgent(project.id)
+    const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read'])
     const res = await h.api.agent.v1.query.post(
       { sql: 'SELECT lo_create(0)' },
@@ -336,7 +331,7 @@ describe('database-level role enforcement', () => {
 
   test('a read-only agent can read a table created by another agent (group grants flow)', async () => {
     const project = await newProject()
-    const author = await newAgent(project.id, 'author')
+    const author = await newAgent('author')
     await grant(author.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
     const authorAuth = bearer(author.apiKey)
     await h.api.agent.v1.query.post(
@@ -345,7 +340,7 @@ describe('database-level role enforcement', () => {
     )
     await h.api.agent.v1.query.post({ sql: 'INSERT INTO shared VALUES (42)' }, { headers: authorAuth })
 
-    const reader = await newAgent(project.id, 'reader')
+    const reader = await newAgent('reader')
     await grant(reader.apiKey, project.id, ['db:read'])
     const read = await h.api.agent.v1.query.post(
       { sql: 'SELECT id FROM shared' },
@@ -358,8 +353,8 @@ describe('database-level role enforcement', () => {
 
 describe('scope requests', () => {
   test('an agent requests a scope; the dashboard sees it pending and approves it', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const auth = bearer(agent.apiKey)
 
     const reqRes = await h.api.agent.v1['scope-requests'].post(
@@ -383,8 +378,8 @@ describe('scope requests', () => {
   })
 
   test('approving an already-resolved request is a 409', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const reqRes = await h.api.agent.v1['scope-requests'].post(
       { scopes: ['db:read'] },
       { headers: bearer(agent.apiKey) },
@@ -397,8 +392,8 @@ describe('scope requests', () => {
   })
 
   test('denying a request leaves the agent without the scope', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const auth = bearer(agent.apiKey)
     const reqRes = await h.api.agent.v1['scope-requests'].post({ scopes: ['db:ddl'] }, { headers: auth })
     const id = reqRes.data?.id
@@ -412,8 +407,8 @@ describe('scope requests', () => {
   })
 
   test('requesting an unknown scope is a 400', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const res = await h.api.agent.v1['scope-requests'].post(
       { scopes: ['db:teleport'] },
       { headers: bearer(agent.apiKey) },
@@ -422,8 +417,8 @@ describe('scope requests', () => {
   })
 
   test('an agent can list its own scope requests', async () => {
-    const project = await newProject()
-    const agent = await newAgent(project.id)
+    await newProject()
+    const agent = await newAgent()
     const auth = bearer(agent.apiKey)
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: auth })
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:write'] }, { headers: auth })
@@ -433,21 +428,20 @@ describe('scope requests', () => {
 })
 
 describe('org-scoped agents', () => {
-  test('identity reports the agent\'s organization and home project', async () => {
-    const project = await newProject('home')
-    const agent = await newAgent(project.id, 'org-bot')
+  test('identity reports the agent\'s organization and no project until granted', async () => {
+    const agent = await newAgent('org-bot')
     const res = await h.api.agent.v1.identity.get({ headers: bearer(agent.apiKey) })
     expect(typeof res.data?.organization.id).toBe('string')
-    expect(res.data?.project?.id).toBe(project.id)
+    expect(res.data?.project).toBeNull()
   })
 
-  test('an agent can be granted access to a second project in its org and query it', async () => {
+  test('an agent can be granted access to specific projects and target them', async () => {
     const home = await newProject('home-proj')
     const other = await newProject('other-proj')
-    const agent = await newAgent(home.id, 'multi-bot')
+    const agent = await newAgent('multi-bot')
     const auth = bearer(agent.apiKey)
 
-    // Request db:read explicitly on the OTHER project (not the home/default target).
+    // Explicitly request db:read on the OTHER project, approve it.
     const req = await h.api.agent.v1['scope-requests'].post(
       { scopes: ['db:read'], resourceType: 'project', resourceId: other.id },
       { headers: auth },
@@ -458,25 +452,24 @@ describe('org-scoped agents', () => {
     const id = req.data?.id
     if (id === undefined) throw new Error('no request id')
     await h.api.api['scope-requests']({ id }).approve.post()
+    // Also grant read on home, so it now reaches two projects.
+    await grant(agent.apiKey, home.id, ['db:read'])
 
-    // It now holds grants on two projects, so an untargeted query is ambiguous.
+    // Two granted projects → an untargeted query is ambiguous and lists the candidates.
     const ambiguous = await h.api.agent.v1.query.post({ sql: 'select 1' }, { headers: auth })
     expect(ambiguous.status).toBe(400)
-    expect((ambiguous.error?.value as ErrorBody | undefined)?.error).toBe('ambiguous_project')
+    const body = ambiguous.error?.value as (ErrorBody & { projects?: { id: string }[] }) | undefined
+    expect(body?.error).toBe('ambiguous_project')
+    expect(body?.projects?.map((p) => p.id).toSorted()).toEqual([home.id, other.id].toSorted())
 
-    // Targeting the OTHER project (where it has db:read) succeeds over its own role.
+    // Targeting a specific project (where it has db:read) succeeds over its own role.
     const ok = await h.api.agent.v1.query.post({ sql: 'select 1 as n', projectId: other.id }, { headers: auth })
     expect(ok.status).toBe(200)
     expect(ok.data?.rows).toEqual([{ n: 1 }])
-
-    // The home project still has no scopes, so a query there is denied.
-    const denied = await h.api.agent.v1.query.post({ sql: 'select 1', projectId: home.id }, { headers: auth })
-    expect(denied.status).toBe(403)
-  }, 20_000)
+  }, 30_000)
 
   test('requesting db scopes at the org level is rejected (no org database)', async () => {
-    const project = await newProject('orglevel')
-    const agent = await newAgent(project.id, 'org-req-bot')
+    const agent = await newAgent('org-req-bot')
     const orgId = await personalOrgId()
     const res = await h.api.agent.v1['scope-requests'].post(
       { scopes: ['db:read'], resourceType: 'org', resourceId: orgId },
@@ -485,36 +478,28 @@ describe('org-scoped agents', () => {
     expect(res.status).toBe(400)
   })
 
-  test('deleting a project clears its grants/requests; the org-scoped agent survives', async () => {
+  test('deleting a project clears its grants; the org-scoped agent keeps its other access', async () => {
     const home = await newProject('keep')
     const other = await newProject('drop')
-    const agent = await newAgent(home.id, 'survivor')
+    const agent = await newAgent('survivor')
     const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, home.id, ['db:read'])
+    await grant(agent.apiKey, other.id, ['db:read'])
 
-    // Grant the agent access to the second project, then delete that project.
-    const req = await h.api.agent.v1['scope-requests'].post(
-      { scopes: ['db:read'], resourceType: 'project', resourceId: other.id },
-      { headers: auth },
-    )
-    const id = req.data?.id
-    if (id === undefined) throw new Error('no request id')
-    await h.api.api['scope-requests']({ id }).approve.post()
     await h.api.api.projects({ id: other.id }).delete()
 
-    // The grant on the deleted project is gone, so the agent has only its home project:
-    // identity still resolves (no dangling reference) and an untargeted query is no longer
-    // ambiguous — it falls back to the home project (where it has no scopes → 403).
+    // The grant on the deleted project is gone (no dangling reference): identity resolves to
+    // `home`, and an untargeted query is no longer ambiguous — it runs on home.
     const identity = await h.api.agent.v1.identity.get({ headers: auth })
     expect(identity.status).toBe(200)
     expect(identity.data?.project?.id).toBe(home.id)
-    const q = await h.api.agent.v1.query.post({ sql: 'select 1' }, { headers: auth })
-    expect(q.status).toBe(403)
-    expect((q.error?.value as ErrorBody | undefined)?.error).toBe('insufficient_scope')
-  }, 20_000)
+    const q = await h.api.agent.v1.query.post({ sql: 'select 1 as n' }, { headers: auth })
+    expect(q.status).toBe(200)
+    expect(q.data?.rows).toEqual([{ n: 1 }])
+  }, 30_000)
 
   test('requesting access on a project in another org is 404 (no existence leak)', async () => {
-    const project = await newProject('mine')
-    const agent = await newAgent(project.id, 'leak-bot')
+    const agent = await newAgent('leak-bot')
     const stranger = await h.clientFor('66666666-6666-6666-6666-666666666666', { email: 'stranger6@example.com' })
     const theirs = await stranger.api.projects.post({ name: 'theirs' })
     const theirId = theirs.data?.id
@@ -587,25 +572,28 @@ describe('cross-org isolation', () => {
   const ALICE = '33333333-3333-3333-3333-333333333333'
   const BOB = '44444444-4444-4444-4444-444444444444'
 
-  /** Alice owns a provisioned project with one agent; Bob is an unrelated user. */
+  /** Alice owns a provisioned project with one (grant-less) agent; Bob is unrelated. */
   async function aliceProjectWithAgent() {
     const alice = await h.clientFor(ALICE, { email: 'alice@corp.test' })
     const bob = await h.clientFor(BOB, { email: 'bob@corp.test' })
+    const orgs = await alice.api.organizations.get()
+    const orgId = orgs.data?.find((o) => o.isPersonal)?.id
+    if (orgId === undefined) throw new Error('alice has no personal org')
     const proj = await alice.api.projects.post({ name: 'alice-proj' })
     const projectId = proj.data?.id
     if (projectId === undefined) throw new Error(`project create failed: ${JSON.stringify(proj.error?.value)}`)
-    const agentRes = await alice.api.projects({ id: projectId }).agents.post({ name: 'a-bot' })
+    const agentRes = await alice.api.organizations({ orgId }).agents.post({ name: 'a-bot' })
     const agent = agentRes.data
     if (agent === null) throw new Error(`agent create failed: ${JSON.stringify(agentRes.error?.value)}`)
-    return { alice, bob, projectId, agentId: agent.id, agentKey: agent.apiKey }
+    return { alice, bob, orgId, projectId, agentId: agent.id, agentKey: agent.apiKey }
   }
 
-  test("a user cannot read, delete, list, or create another user's agents", async () => {
-    const { bob, projectId, agentId } = await aliceProjectWithAgent()
+  test("a user cannot read, delete, or create another user's agents", async () => {
+    const { bob, orgId, agentId } = await aliceProjectWithAgent()
     expect((await bob.api.agents({ id: agentId }).get()).status).toBe(404)
     expect((await bob.api.agents({ id: agentId }).delete()).status).toBe(404)
-    expect((await bob.api.projects({ id: projectId }).agents.get()).status).toBe(404)
-    expect((await bob.api.projects({ id: projectId }).agents.post({ name: 'sneaky' })).status).toBe(404)
+    // Bob isn't a member of Alice's org, so he can't create an agent in it either.
+    expect((await bob.api.organizations({ orgId }).agents.post({ name: 'sneaky' })).status).toBe(404)
   })
 
   test("a user cannot see or resolve another user's scope request", async () => {
@@ -720,9 +708,16 @@ describe('dev login bypass', () => {
   })
 })
 
-/** Helper: have an agent request scopes and immediately approve them as the user. */
-async function grant(apiKey: string, _projectId: string, scopes: ('db:read' | 'db:write' | 'db:delete' | 'db:ddl')[]): Promise<void> {
-  const reqRes = await h.api.agent.v1['scope-requests'].post({ scopes }, { headers: bearer(apiKey) })
+/** Helper: have an agent request scopes on a project and immediately approve them. */
+async function grant(
+  apiKey: string,
+  projectId: string,
+  scopes: ('db:read' | 'db:write' | 'db:delete' | 'db:ddl')[],
+): Promise<void> {
+  const reqRes = await h.api.agent.v1['scope-requests'].post(
+    { scopes, resourceType: 'project', resourceId: projectId },
+    { headers: bearer(apiKey) },
+  )
   const id = reqRes.data?.id
   if (id === undefined) {
     throw new Error(`scope request failed: ${JSON.stringify(reqRes.error?.value)}`)
@@ -751,8 +746,11 @@ describe('organizations', () => {
 
   test('GET /api/organizations/:orgId/projects lists projects with at-a-glance counts', async () => {
     const project = await newProject('counts')
-    await newAgent(project.id, 'a1')
-    await newAgent(project.id, 'a2')
+    const a1 = await newAgent('a1')
+    const a2 = await newAgent('a2')
+    // agentCount = agents with a grant on the project, so grant both their access.
+    await grant(a1.apiKey, project.id, ['db:read'])
+    await grant(a2.apiKey, project.id, ['db:read'])
     const orgId = await personalOrgId()
 
     const res = await h.api.api.organizations({ orgId }).projects.get()
@@ -761,11 +759,11 @@ describe('organizations', () => {
     expect(row?.agentCount).toBe(2)
     expect(row?.pendingRequestCount).toBe(0)
     expect(row?.defaultBranch).toBe('main')
-  })
+  }, 20_000)
 
   test('pendingRequestCount counts only open scope requests', async () => {
     const project = await newProject('pending')
-    const agent = await newAgent(project.id, 'bot')
+    const agent = await newAgent('bot')
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agent.apiKey) })
     const orgId = await personalOrgId()
 
@@ -775,14 +773,15 @@ describe('organizations', () => {
 
   test('GET /api/organizations/:orgId/agents is the org-wide roster with per-project grants', async () => {
     const project = await newProject('roster')
-    await newAgent(project.id, 'roster-bot')
+    const agent = await newAgent('roster-bot')
+    await grant(agent.apiKey, project.id, ['db:read'])
     const orgId = await personalOrgId()
 
     const res = await h.api.api.organizations({ orgId }).agents.get()
     expect(res.status).toBe(200)
     const bot = res.data?.find((a) => a.name === 'roster-bot')
     expect(bot?.grants.some((g) => g.resourceType === 'project' && g.projectName === 'roster')).toBe(true)
-  })
+  }, 20_000)
 
   test('a non-member cannot read another org\'s projects or agents (404, no existence leak)', async () => {
     const orgId = await personalOrgId()
@@ -808,8 +807,8 @@ describe('organizations', () => {
   })
 
   test('GET /api/organizations/:orgId/requests lists the org\'s scope requests', async () => {
-    const project = await newProject('reqs')
-    const agent = await newAgent(project.id, 'r-bot')
+    await newProject('reqs')
+    const agent = await newAgent('r-bot')
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:write'] }, { headers: bearer(agent.apiKey) })
     const orgId = await personalOrgId()
 
@@ -826,8 +825,8 @@ describe('organizations', () => {
   })
 
   test("an org's request list excludes other orgs' requests (tenant isolation)", async () => {
-    const project = await newProject('iso')
-    const agent = await newAgent(project.id, 'iso-bot')
+    await newProject('iso')
+    const agent = await newAgent('iso-bot')
     await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agent.apiKey) })
     const orgA = await personalOrgId()
 
@@ -871,7 +870,7 @@ describe('branches', () => {
 describe('activity', () => {
   test('agent queries (allowed and denied) are recorded in project activity', async () => {
     const project = await newProject('act')
-    const agent = await newAgent(project.id, 'act-bot')
+    const agent = await newAgent('act-bot')
 
     // A denied attempt first (no scopes yet; SELECT needs db:read), then grant + run.
     const denied = await h.api.agent.v1.query.post({ sql: 'select 1' }, { headers: bearer(agent.apiKey) })

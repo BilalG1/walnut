@@ -4,40 +4,29 @@ import { useState, type FormEvent } from 'react'
 import { useCreateAgent } from '../../data/queries.ts'
 import { saveAgentKey } from '../../lib/agentKeys.ts'
 
-export interface ProjectOption {
-  id: string
-  name: string
-}
-
 interface CreatedAgent {
   name: string
   apiKey: string
 }
 
-/** Create an org-scoped agent, homed on a chosen (active) project, then reveal its API key
- * exactly once. The agent can later be granted access to other projects in the org. */
+/** Create an org-scoped agent, then reveal its API key exactly once. The agent is born
+ * with no access — the user grants it per-project scopes by approving its requests. */
 export function CreateAgentDialog({
   orgId,
-  projects,
   open,
   onClose,
 }: {
   orgId: string
-  projects: ProjectOption[]
   open: boolean
   onClose: () => void
 }) {
   const create = useCreateAgent(orgId)
   const [name, setName] = useState('')
-  const [projectId, setProjectId] = useState('')
   const [created, setCreated] = useState<CreatedAgent | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const selectedProjectId = projectId !== '' ? projectId : (projects[0]?.id ?? '')
-
   function close() {
     setName('')
-    setProjectId('')
     setCreated(null)
     setCopied(false)
     create.reset()
@@ -47,11 +36,11 @@ export function CreateAgentDialog({
   function submit(event: FormEvent) {
     event.preventDefault()
     const trimmed = name.trim()
-    if (trimmed === '' || selectedProjectId === '' || create.isPending) {
+    if (trimmed === '' || create.isPending) {
       return
     }
     create.mutate(
-      { projectId: selectedProjectId, name: trimmed },
+      { name: trimmed },
       {
         onSuccess: (agent) => {
           saveAgentKey(localStorage, agent.id, agent.apiKey)
@@ -74,53 +63,28 @@ export function CreateAgentDialog({
     <Dialog open={open} onClose={close} title={created === null ? 'New agent' : 'Agent created'}>
       {created === null ? (
         <form onSubmit={submit} className="space-y-3">
-          {projects.length === 0 ? (
-            <p className="text-sm text-neutral-400">
-              No active projects yet — create one first, then add an agent to it.
-            </p>
-          ) : (
-            <>
-              <div>
-                <label htmlFor="agent-name" className="mb-1 block text-xs text-neutral-500">
-                  Name
-                </label>
-                <Input
-                  id="agent-name"
-                  value={name}
-                  onChange={(event) => setName(event.currentTarget.value)}
-                  placeholder="e.g. claude-code"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label htmlFor="agent-project" className="mb-1 block text-xs text-neutral-500">
-                  Project
-                </label>
-                <select
-                  id="agent-project"
-                  value={selectedProjectId}
-                  onChange={(event) => setProjectId(event.currentTarget.value)}
-                  className="h-8 w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 text-sm text-neutral-100 outline-none transition-colors focus:border-walnut-500"
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-xs text-neutral-500">
-                The agent joins this organization with no scopes, homed on this project. It
-                requests access — here or to other projects — and you approve it in Requests.
-              </p>
-            </>
-          )}
+          <div>
+            <label htmlFor="agent-name" className="mb-1 block text-xs text-neutral-500">
+              Name
+            </label>
+            <Input
+              id="agent-name"
+              value={name}
+              onChange={(event) => setName(event.currentTarget.value)}
+              placeholder="e.g. claude-code"
+              autoFocus
+            />
+          </div>
+          <p className="text-xs text-neutral-500">
+            The agent joins this organization with no access. It requests scopes on a project, and
+            you approve them in Requests.
+          </p>
           {create.error !== null ? <p className="text-xs text-red-400">{create.error.message}</p> : null}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" onClick={close} disabled={create.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={create.isPending || projects.length === 0}>
+            <Button type="submit" disabled={create.isPending || name.trim() === ''}>
               {create.isPending ? 'Creating…' : 'Create agent'}
             </Button>
           </div>

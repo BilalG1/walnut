@@ -179,15 +179,26 @@ export async function createCliHarness(): Promise<CliHarness> {
     return projData
   }
 
+  async function systemOrgId(): Promise<string> {
+    const res = await api.api.organizations.get()
+    const org = (res.data as { id: string; isPersonal: boolean }[] | null)?.find((o) => o.isPersonal)
+    if (org === undefined) {
+      throw new Error(`no personal org: ${JSON.stringify(res.error?.value)}`)
+    }
+    return org.id
+  }
+
+  // Agents are org-scoped and born grant-less; `scopes` is granted on the created project.
   async function makeAgent(opts: MakeAgentOptions = {}): Promise<{ projectId: string; key: string }> {
     const projData = await makeProject(opts.projectName ?? 'cli-proj')
-    const agent = await api.api.projects({ id: projData.id }).agents.post({ name: opts.agentName ?? 'cli-agent' })
+    const orgId = await systemOrgId()
+    const agent = await api.api.organizations({ orgId }).agents.post({ name: opts.agentName ?? 'cli-agent' })
     const agentData = agent.data as { apiKey: string } | null
     if (agentData === null) {
       throw new Error(`createAgent failed: ${JSON.stringify(agent.error?.value)}`)
     }
     if (opts.scopes !== undefined && opts.scopes.length > 0) {
-      await grant(agentData.apiKey, opts.scopes)
+      await grant(agentData.apiKey, opts.scopes, projData.id)
     }
     return { projectId: projData.id, key: agentData.apiKey }
   }

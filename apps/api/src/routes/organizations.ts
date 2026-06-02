@@ -2,13 +2,14 @@ import { Elysia, t } from 'elysia'
 import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import {
+  toAgentView,
   toOrgAgentView,
   toOrgProjectSummary,
   toOrgSummary,
   toProjectDetail,
   toScopeRequestView,
 } from '../serializers.ts'
-import { listOrgAgents } from '../services/agents.ts'
+import { createAgent, listOrgAgents } from '../services/agents.ts'
 import { listOrganizations } from '../services/organizations.ts'
 import { createProject, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
@@ -43,6 +44,16 @@ export function organizationRoutes(ctx: AppContext) {
       const rows = await listOrgAgents(ctx, params.orgId, userId)
       return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectNames))
     })
+    .post(
+      '/:orgId/agents',
+      async ({ userId, params, body }) => {
+        // Agents are org-scoped and born grant-less; the user grants them per-project
+        // access by approving their scope requests.
+        const { agent, grants, apiKey } = await createAgent(ctx, params.orgId, userId, body)
+        return { ...toAgentView(agent, grants), apiKey }
+      },
+      { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
+    )
     .get(
       '/:orgId/requests',
       async ({ userId, params, query }) => {

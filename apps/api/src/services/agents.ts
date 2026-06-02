@@ -22,7 +22,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
 import { assertOrgMember } from './organizations.ts'
-import { getProject, getProjectInternal } from './projects.ts'
+import { getProjectInternal, listProjectsInOrg } from './projects.ts'
 
 /** An agent plus its grants — the unit the dashboard and serializers care about. */
 export interface AgentWithGrants {
@@ -90,8 +90,10 @@ export async function agentProjectIds(ctx: AppContext, agentId: string): Promise
 
 /**
  * Resolve which project an agent action targets. An explicit id wins (and must belong to
- * the agent's org). Otherwise default to the single project the agent has a grant on; 0
- * or >1 grants is an error the agent can act on (request access, or pass an explicit id).
+ * the agent's org). Otherwise default to the single project the agent has a grant on — and
+ * if it has none yet, the org's sole project — so a freshly-created (grant-less) agent in a
+ * one-project org still has an obvious target (a query there 403s for the missing scope; a
+ * request lands on it). 0 or >1 candidates is an error the agent can act on (pass --project).
  */
 export async function resolveAgentProject(
   ctx: AppContext,
@@ -105,19 +107,22 @@ export async function resolveAgentProject(
     }
     return project
   }
-  const ids = await agentProjectIds(ctx, agent.id)
+  let ids = await agentProjectIds(ctx, agent.id)
+  if (ids.length === 0) {
+    ids = (await listProjectsInOrg(ctx, agent.organizationId)).map((p) => p.id)
+  }
   const only = ids[0]
   if (only === undefined) {
     throw new HttpError(400, {
       error: 'no_project',
-      message: 'Agent has access to no project. Ask the user to approve access to one (see `walnut project ls`).',
+      message: 'Agent has no project to target. Ask the user to create one (see `walnut project ls`).',
     })
   }
   if (ids.length > 1) {
     const names = await projectNames(ctx, ids)
     throw new HttpError(400, {
       error: 'ambiguous_project',
-      message: 'Agent has access to multiple projects; pass --project <id> to choose one.',
+      message: 'Agent has several projects to choose from; pass --project <id>.',
       projects: ids.map((id) => ({ id, name: names.get(id) ?? null })),
     })
   }
@@ -140,25 +145,6 @@ export async function getAgentHomeProject(
     return null
   }
   return { project: await getProjectInternal(ctx, home.resourceId), scopes: home.scopes }
-}
-
-/** Agents that hold a grant on a given project (caller must be a member of its org). */
-export async function listAgents(ctx: AppContext, projectId: string, userId: string): Promise<AgentWithGrants[]> {
-  await getProject(ctx, projectId, userId)
-  const grantRows = await ctx.db
-    .select({ agentId: agentGrants.agentId })
-    .from(agentGrants)
-    .where(and(eq(agentGrants.resourceType, 'project'), eq(agentGrants.resourceId, projectId)))
-  const agentIds = [...new Set(grantRows.map((r) => r.agentId))]
-  if (agentIds.length === 0) {
-    return []
-  }
-  const rows = await ctx.db.select().from(agents).where(inArray(agents.id, agentIds)).orderBy(desc(agents.createdAt))
-  const grants = await grantsByAgent(
-    ctx,
-    rows.map((a) => a.id),
-  )
-  return rows.map((agent) => ({ agent, grants: grants.get(agent.id) ?? [] }))
 }
 
 /** An org-wide agent row: the agent, its grants, and the names of the projects those
@@ -208,55 +194,27 @@ export interface CreatedAgent extends AgentWithGrants {
 
 export async function createAgent(
   ctx: AppContext,
-  projectId: string,
+  orgId: string,
   userId: string,
   input: { name: string },
 ): Promise<CreatedAgent> {
-  const project = await getProject(ctx, projectId, userId)
-  if (project.connectionUri === null) {
-    throw new HttpError(409, {
-      error: 'project_not_ready',
-      message: `Project is "${project.status}"; cannot create an agent until its database is provisioned.`,
-    })
-  }
-
-  // Provision the agent's restricted Postgres role for its home project up front; its
-  // queries run over this connection, never the project owner connection.
-  const { role, connectionUri } = await createAgentRole(project.connectionUri)
-
+  await assertOrgMember(ctx, orgId, userId)
+  // Born with zero grants and zero roles: an agent gets a scoped Postgres role only when
+  // its first scope request on a resource is approved (see grantScopes).
   const apiKey = newAgentKey()
-  let result: AgentWithGrants
-  try {
-    result = await ctx.db.transaction(async (tx) => {
-      const [agent] = await tx
-        .insert(agents)
-        .values({
-          organizationId: project.organizationId,
-          name: input.name,
-          keyHash: hashKey(apiKey),
-          keyPrefix: keyPrefix(apiKey),
-        })
-        .returning()
-      if (agent === undefined) {
-        throw new Error('Failed to insert agent row.')
-      }
-      const [grant] = await tx
-        .insert(agentGrants)
-        .values({ agentId: agent.id, resourceType: 'project', resourceId: projectId, scopes: [], dbRole: role, connectionUri })
-        .returning()
-      if (grant === undefined) {
-        throw new Error('Failed to insert agent grant row.')
-      }
-      return { agent, grants: [grant] }
+  const [agent] = await ctx.db
+    .insert(agents)
+    .values({
+      organizationId: orgId,
+      name: input.name,
+      keyHash: hashKey(apiKey),
+      keyPrefix: keyPrefix(apiKey),
     })
-  } catch (err) {
-    // Roll back the just-created role on any failure so we don't leak it.
-    await rollbackAgentRole(project.connectionUri, role)
-    throw err instanceof HttpError
-      ? err
-      : new HttpError(500, { error: 'internal_error', message: 'Failed to create agent.' })
+    .returning()
+  if (agent === undefined) {
+    throw new HttpError(500, { error: 'internal_error', message: 'Failed to create agent.' })
   }
-  return { ...result, apiKey }
+  return { agent, grants: [], apiKey }
 }
 
 /** Best-effort drop of an agent role during error recovery; logs but never throws. */

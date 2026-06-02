@@ -49,13 +49,12 @@ export function useResolveRequest(orgId: string) {
   })
 }
 
-/** Create an agent in a project; the response carries the one-time API key. Refreshes
- * the org roster and project counts. */
+/** Create an org-scoped agent (born grant-less); the response carries the one-time API
+ * key. Refreshes the org roster and project counts. */
 export function useCreateAgent(orgId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ projectId, name }: { projectId: string; name: string }) =>
-      unwrap(api.api.projects({ id: projectId }).agents.post({ name })),
+    mutationFn: ({ name }: { name: string }) => unwrap(api.api.organizations({ orgId }).agents.post({ name })),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
       void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
