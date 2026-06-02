@@ -1,5 +1,7 @@
-import type { AgentScope, ProviderKind } from '@walnut/core'
+import type { AgentScope, GrantResourceType, ProviderKind } from '@walnut/core'
 import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+
+export type { GrantResourceType } from '@walnut/core'
 
 export type ProjectStatus = 'provisioning' | 'active' | 'error'
 export type ScopeRequestStatus = 'pending' | 'approved' | 'denied'
@@ -9,13 +11,6 @@ export type QueryEventStatus = 'ok' | 'denied' | 'error'
  * column exists so richer roles (admin/member) and invites slot in without a schema
  * change. */
 export type OrgRole = 'owner' | 'admin' | 'member'
-/**
- * The resource a grant (or scope request) is anchored to. Only `project` exists
- * today; `org` and `branch` slot in when those entities land — the grant model is
- * the extension point (see CLAUDE.md), which is why `agent_grants.resource_id` is a
- * bare uuid + discriminator rather than a single foreign key.
- */
-export type GrantResourceType = 'project'
 
 const createdAt = timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 
@@ -127,8 +122,9 @@ export const agentGrants = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: 'cascade' }),
     resourceType: text('resource_type').$type<GrantResourceType>().notNull(),
-    /** The resource this grant applies to (a project id, for now). No FK: the type
-     * is polymorphic, so cascade cleanup rides on `agent_id` instead. */
+    /** The id of the `resourceType` node this grant applies to (an org, project, or
+     * branch id). No FK: the reference is polymorphic, so cascade cleanup rides on
+     * `agent_id` instead. */
     resourceId: uuid('resource_id').notNull(),
     scopes: jsonb('scopes').$type<AgentScope[]>().notNull().default([]),
     /** The agent's restricted Postgres role for this resource's database. */

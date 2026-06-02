@@ -28,6 +28,53 @@ export function isAgentScope(value: string): value is AgentScope {
 }
 
 /**
+ * The resource a grant (or scope request) is anchored to. An agent is org-scoped
+ * (its tenancy), but a grant binds it to a specific node in the resource tree:
+ * the whole `org`, a single `project`, or a `branch` of a project. The union is
+ * intentionally open so future nodes slot in without reshaping the grant model.
+ */
+export const GRANT_RESOURCE_TYPES = ['org', 'project', 'branch'] as const
+
+export type GrantResourceType = (typeof GRANT_RESOURCE_TYPES)[number]
+
+/**
+ * Which scopes are grantable at each resource level. `db:*` scopes attach to a
+ * database, which only exists at the `project`/`branch` level — never the `org`,
+ * which has no database of its own. The `org` level is reserved vocabulary for
+ * future, non-database org-wide scopes (e.g. `project:create`, `member:invite`),
+ * so it grants nothing today.
+ */
+export const SCOPES_BY_RESOURCE: Record<GrantResourceType, readonly AgentScope[]> = {
+  org: [],
+  project: DB_SCOPES,
+  branch: DB_SCOPES,
+}
+
+export function isScopeValidForResource(resourceType: GrantResourceType, scope: AgentScope): boolean {
+  return SCOPES_BY_RESOURCE[resourceType].includes(scope)
+}
+
+/**
+ * Validate and normalise scopes for a specific resource level: parses them like
+ * `parseScopes` (rejecting unknown scopes), then rejects any scope that cannot be
+ * granted at `resourceType`. Throws with a clear, machine-readable message so the
+ * agent learns exactly which scopes belong at which level.
+ */
+export function parseScopesForResource(resourceType: GrantResourceType, input: readonly string[]): AgentScope[] {
+  const parsed = parseScopes(input)
+  const allowed = SCOPES_BY_RESOURCE[resourceType]
+  const disallowed = parsed.filter((s) => !allowed.includes(s))
+  if (disallowed.length > 0) {
+    const allowedText = allowed.length === 0 ? 'none' : allowed.join(', ')
+    throw new Error(
+      `Scope(s) ${disallowed.join(', ')} cannot be granted at the "${resourceType}" level. ` +
+        `Scopes grantable at "${resourceType}": ${allowedText}.`,
+    )
+  }
+  return parsed
+}
+
+/**
  * Validate and normalise an arbitrary list of scope strings into a deduplicated,
  * display-ordered list of known scopes. Throws on any unknown scope so callers
  * get a precise error instead of silently dropping input.
