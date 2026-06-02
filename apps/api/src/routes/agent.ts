@@ -5,6 +5,7 @@ import { HttpError, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
 import { findAgentByKey, getAgentGrant, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
+import { branchExists, listProjectsInOrg } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
 
@@ -33,12 +34,25 @@ export function agentApiRoutes(ctx: AppContext) {
         project: home === null ? null : { id: home.project.id, name: home.project.name, status: home.project.status },
       }
     })
+    // The projects the agent could target or request access to — everything in its org, so
+    // it can discover ids for `--project` (and for scope requests on projects it can't reach
+    // yet). Deliberately minimal: id + name only.
+    .get('/projects', async ({ agent }) => {
+      const rows = await listProjectsInOrg(ctx, agent.organizationId)
+      return rows.map((p) => ({ id: p.id, name: p.name }))
+    })
     .post(
       '/query',
       async ({ agent, body }) => {
         // Pick the target project (explicit, or the agent's sole granted project) and run
         // over its scoped grant — defense in depth behind the SQL classifier.
         const project = await resolveAgentProject(ctx, agent, body.projectId)
+        if (body.branch !== undefined && !(await branchExists(ctx, project.id, body.branch))) {
+          throw new HttpError(404, {
+            error: 'branch_not_found',
+            message: `No branch "${body.branch}" on this project.`,
+          })
+        }
         const grant = await getAgentGrant(ctx, agent.id, 'project', project.id)
         const startedAt = Date.now()
         try {
@@ -76,7 +90,13 @@ export function agentApiRoutes(ctx: AppContext) {
           throw err
         }
       },
-      { body: t.Object({ sql: t.String({ minLength: 1 }), projectId: t.Optional(t.String()) }) },
+      {
+        body: t.Object({
+          sql: t.String({ minLength: 1 }),
+          projectId: t.Optional(t.String()),
+          branch: t.Optional(t.String()),
+        }),
+      },
     )
     .post(
       '/scope-requests',

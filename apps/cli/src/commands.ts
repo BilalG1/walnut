@@ -29,10 +29,34 @@ export async function whoami(client: ApiClient, pretty: boolean): Promise<CliRes
   }
 }
 
-/** `db query <sql>` → POST /agent/v1/query. */
-export async function dbQuery(client: ApiClient, sql: string, pretty: boolean): Promise<CliResult> {
+/** Which project/branch a command targets. Both are optional: omit `projectId` and the
+ * server uses the agent's sole project (erroring if it can reach several); omit `branch`
+ * and it targets the project's default branch (main). */
+export interface Target {
+  projectId?: string
+  branch?: string
+}
+
+/** `project ls` → GET /agent/v1/projects (every project in the agent's org: id + name). */
+export async function projectLs(client: ApiClient, pretty: boolean): Promise<CliResult> {
   try {
-    const res = await client.agent.v1.query.post({ sql })
+    const res = await client.agent.v1.projects.get()
+    return respond(res, pretty)
+  } catch (err) {
+    return networkError(err, pretty)
+  }
+}
+
+/** `db query <sql>` → POST /agent/v1/query, against the chosen project + branch. Only sends
+ * the target fields the user actually set, so the server applies its own defaults. */
+export async function dbQuery(client: ApiClient, sql: string, target: Target, pretty: boolean): Promise<CliResult> {
+  try {
+    const body = {
+      sql,
+      ...(target.projectId === undefined ? {} : { projectId: target.projectId }),
+      ...(target.branch === undefined ? {} : { branch: target.branch }),
+    }
+    const res = await client.agent.v1.query.post(body)
     return respond(res, pretty)
   } catch (err) {
     return networkError(err, pretty)
@@ -59,15 +83,21 @@ export async function scopeLs(client: ApiClient, pretty: boolean): Promise<CliRe
   }
 }
 
-/** `scope request <scope...>` → POST /agent/v1/scope-requests. */
+/** `scope request <scope...>` → POST /agent/v1/scope-requests. With `--project` the request
+ * targets that project; without it the server defaults to the agent's sole project. */
 export async function scopeRequest(
   client: ApiClient,
   scopes: string[],
   reason: string | undefined,
+  projectId: string | undefined,
   pretty: boolean,
 ): Promise<CliResult> {
   try {
-    const body = reason === undefined ? { scopes } : { scopes, reason }
+    const withReason = reason === undefined ? { scopes } : { scopes, reason }
+    const body =
+      projectId === undefined
+        ? withReason
+        : { ...withReason, resourceType: 'project' as const, resourceId: projectId }
     const res = await client.agent.v1['scope-requests'].post(body)
     return respond(res, pretty)
   } catch (err) {

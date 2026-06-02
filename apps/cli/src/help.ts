@@ -13,14 +13,22 @@ USAGE
 COMMANDS
   login --api-key <key>        Store credentials (the user runs this once).
   logout                       Remove stored credentials.
-  whoami                       Print this agent's identity, scopes, and project.
-  db query <sql | ->           Run SQL against the project database ("-" reads stdin).
+  whoami                       Print this agent's identity, scopes, org, and home project.
+  project ls                   List the projects in this agent's organization (id + name).
+  db query <sql | ->           Run SQL against a project database ("-" reads stdin).
   scope ls                     List granted scopes and pending scope requests.
   scope request <scope...>     Ask the user to grant scopes (--reason to explain).
+
+TARGETING (db query, scope request)
+  An agent is org-scoped and may reach several projects. Commands take an optional
+  --project; omit it and the server uses the one project you can reach (and errors,
+  listing candidates, if there are several). Use \`walnut project ls\` to find ids.
 
 GLOBAL FLAGS
   --api-url <url>     API base URL (overrides the stored value; default https://api.walnut.sh).
   --api-key <key>     Agent API key (overrides the stored value, for one-off calls).
+  --project <id>      Target project (default: the agent's sole project).
+  --branch <name>     Target branch for db query (default: main).
   --pretty            Pretty-print JSON output (default: compact).
   -h, --help          Show help.
   --version           Show version.
@@ -46,14 +54,31 @@ NOTES
   here. Credentials are written owner-only (chmod 600). Run \`walnut whoami\` to verify.`
 }
 
+export function projectHelp(): string {
+  return `walnut project — project commands
+
+USAGE
+  walnut project ls     List the projects in this agent's organization (id + name).
+
+NOTES
+  Lists every project in the org, including ones the agent has no access to yet — use
+  the ids with \`--project\` on db query, or to request access with \`scope request\`.`
+}
+
 export function dbHelp(): string {
   return `walnut db — database commands
 
 USAGE
   walnut db query <sql | ->     Execute SQL (needs db:* scopes). "-" reads SQL from stdin.
 
+FLAGS
+  --project <id>     Target project (default: the agent's sole project; required if it
+                     can reach several — the error lists the candidates).
+  --branch <name>    Target branch (default: main).
+
 EXAMPLES
   walnut db query "select 1"
+  walnut db query --project <id> "select 1"
   echo "select * from notes" | walnut db query -`
 }
 
@@ -64,8 +89,10 @@ USAGE
   walnut scope ls                       Granted scopes + pending requests.
   walnut scope request <scope...>       Request scopes (e.g. db:read db:write).
                                         --reason "<text>" to explain why.
+                                        --project <id> to target a specific project.
 
 EXAMPLES
   walnut scope ls
-  walnut scope request db:read db:write --reason "seed the database"`
+  walnut scope request db:read db:write --reason "seed the database"
+  walnut scope request db:read --project <id>`
 }

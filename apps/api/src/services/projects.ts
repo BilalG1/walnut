@@ -79,6 +79,22 @@ export async function listOrgProjects(ctx: AppContext, orgId: string, userId: st
   }))
 }
 
+/** Every project in an org, newest first. No membership check — for agent callers that
+ * are already authenticated and bound to the org. */
+export async function listProjectsInOrg(ctx: AppContext, orgId: string): Promise<Project[]> {
+  return ctx.db.select().from(projects).where(eq(projects.organizationId, orgId)).orderBy(desc(projects.createdAt))
+}
+
+/** Whether a branch of the given name exists on a project. */
+export async function branchExists(ctx: AppContext, projectId: string, name: string): Promise<boolean> {
+  const [row] = await ctx.db
+    .select({ id: branches.id })
+    .from(branches)
+    .where(and(eq(branches.projectId, projectId), eq(branches.name, name)))
+    .limit(1)
+  return row !== undefined
+}
+
 /** A project's branches (caller must be a member of its org). Default branch first. */
 export async function listBranches(ctx: AppContext, projectId: string, userId: string): Promise<Branch[]> {
   await getProject(ctx, projectId, userId)

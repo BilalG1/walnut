@@ -80,6 +80,27 @@ describe('login / logout', () => {
   })
 })
 
+describe('project ls', () => {
+  test('lists every project in the org (id + name), including ones with no access', async () => {
+    const { projectId, key } = await h.makeAgent({ projectName: 'p-one' })
+    const other = await h.makeProject('p-two')
+    const r = await h.run(['project', 'ls'], { key })
+    expect(r.code).toBe(0)
+    const out = parse(r.stdout) as { id: string; name: string }[]
+    expect(out.some((p) => p.id === projectId && p.name === 'p-one')).toBe(true)
+    // The agent has no grant on p-two, but it's still listed so the agent can request access.
+    expect(out.some((p) => p.id === other.id && p.name === 'p-two')).toBe(true)
+    // Deliberately minimal shape: id + name only.
+    expect(Object.keys(out[0] ?? {}).toSorted()).toEqual(['id', 'name'])
+  })
+
+  test('unknown subcommand → exit 2', async () => {
+    const { key } = await h.makeAgent()
+    const r = await h.run(['project', 'nope'], { key })
+    expect(r.code).toBe(2)
+  })
+})
+
 describe('db query', () => {
   test('a granted read returns rows, exit 0', async () => {
     const { key } = await h.makeAgent({ scopes: ['db:read'] })
@@ -89,6 +110,31 @@ describe('db query', () => {
     expect(out.rowCount).toBe(1)
     expect(out.rows).toEqual([{ n: 1 }])
   })
+
+  test('--project targets an explicit project; --branch main is accepted', async () => {
+    const { projectId, key } = await h.makeAgent({ scopes: ['db:read'] })
+    const r = await h.run(['db', 'query', 'select 1 as n', '--project', projectId, '--branch', 'main'], { key })
+    expect(r.code).toBe(0)
+    expect(parse(r.stdout).rows).toEqual([{ n: 1 }])
+  })
+
+  test('an unknown --branch is rejected → exit 5', async () => {
+    const { key } = await h.makeAgent({ scopes: ['db:read'] })
+    const r = await h.run(['db', 'query', 'select 1', '--branch', 'nope'], { key })
+    expect(r.code).toBe(5)
+    expect(parse(r.stderr).error).toBe('branch_not_found')
+  })
+
+  test('no --project when the agent can reach several is ambiguous → exit 5 with candidates', async () => {
+    const { projectId, key } = await h.makeAgent({ scopes: ['db:read'] })
+    const other = await h.makeProject('p-second')
+    await h.grant(key, ['db:read'], other.id)
+    const r = await h.run(['db', 'query', 'select 1'], { key })
+    expect(r.code).toBe(5)
+    const body = parse(r.stderr)
+    expect(body.error).toBe('ambiguous_project')
+    expect(body.projects.map((p: { id: string }) => p.id).toSorted()).toEqual([projectId, other.id].toSorted())
+  }, 20_000)
 
   test('insufficient scope → exit 4 with the machine-readable body intact', async () => {
     const { key } = await h.makeAgent()
@@ -140,6 +186,16 @@ describe('scope', () => {
     const { key } = await h.makeAgent()
     const r = await h.run(['scope', 'request', 'db:teleport'], { key })
     expect(r.code).toBe(5)
+  })
+
+  test('scope request --project targets that project explicitly', async () => {
+    const { projectId, key } = await h.makeAgent()
+    const r = await h.run(['scope', 'request', 'db:read', '--project', projectId], { key })
+    expect(r.code).toBe(0)
+    const out = parse(r.stdout)
+    expect(out.status).toBe('pending')
+    expect(out.resourceType).toBe('project')
+    expect(out.resourceId).toBe(projectId)
   })
 })
 

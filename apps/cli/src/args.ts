@@ -5,7 +5,7 @@
  */
 
 /** Flags that take a value (`--flag value` or `--flag=value`). */
-const VALUE_FLAGS = new Set(['api-url', 'api-key', 'reason'])
+const VALUE_FLAGS = new Set(['api-url', 'api-key', 'reason', 'project', 'branch'])
 /** Boolean flags (presence = true). */
 const BOOL_FLAGS = new Set(['pretty', 'help', 'version'])
 

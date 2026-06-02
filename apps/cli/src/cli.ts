@@ -1,11 +1,17 @@
 import { parseArgs } from './args.ts'
 import { type ApiClient, makeClient } from './client.ts'
-import { dbQuery, login, logout, scopeLs, scopeRequest, whoami } from './commands.ts'
+import { dbQuery, login, logout, projectLs, scopeLs, scopeRequest, whoami } from './commands.ts'
 import { resolveConfig } from './config.ts'
 import { EXIT } from './exit.ts'
-import { authHelp, dbHelp, scopeHelp, topLevelHelp } from './help.ts'
+import { authHelp, dbHelp, projectHelp, scopeHelp, topLevelHelp } from './help.ts'
 import { fail, type CliResult } from './output.ts'
 import { VERSION } from './version.ts'
+
+/** Read a string-valued flag, or undefined when absent/boolean. */
+function flag(options: Record<string, string | boolean>, name: string): string | undefined {
+  const value = options[name]
+  return typeof value === 'string' ? value : undefined
+}
 
 /** Injected so the dispatcher stays testable without touching the real process or
  * network. `homeDir` locates the credentials file; tests point it at a temp dir.
@@ -83,7 +89,21 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
           return fail(EXIT.USAGE, 'usage', 'db query - was given empty stdin.', pretty)
         }
       }
-      return withClient(io, parsed.options, pretty, (client) => dbQuery(client, sql, pretty))
+      // Both optional: the server defaults --project to the agent's sole project and
+      // --branch to the project's default branch (main).
+      const target = { projectId: flag(parsed.options, 'project'), branch: flag(parsed.options, 'branch') }
+      return withClient(io, parsed.options, pretty, (client) => dbQuery(client, sql, target, pretty))
+    }
+
+    case 'project': {
+      if (wantsHelp) return help(projectHelp())
+      if (sub === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'project needs a subcommand. Try: walnut project ls.', pretty)
+      }
+      if (sub !== 'ls') {
+        return fail(EXIT.USAGE, 'usage', `Unknown project subcommand: ${sub}. Only "ls" is supported.`, pretty)
+      }
+      return withClient(io, parsed.options, pretty, (client) => projectLs(client, pretty))
     }
 
     case 'scope': {
@@ -98,8 +118,9 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
         if (rest.length === 0) {
           return fail(EXIT.USAGE, 'usage', 'scope request needs at least one scope (e.g. db:read db:write).', pretty)
         }
-        const reason = typeof parsed.options.reason === 'string' ? parsed.options.reason : undefined
-        return withClient(io, parsed.options, pretty, (client) => scopeRequest(client, rest, reason, pretty))
+        const reason = flag(parsed.options, 'reason')
+        const projectId = flag(parsed.options, 'project')
+        return withClient(io, parsed.options, pretty, (client) => scopeRequest(client, rest, reason, projectId, pretty))
       }
       return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)
     }

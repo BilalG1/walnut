@@ -109,7 +109,11 @@ export interface CliHarness {
   /** Temp home directory where the CLI reads/writes its credentials file. */
   homeDir: string
   makeAgent: (opts?: MakeAgentOptions) => Promise<{ projectId: string; key: string }>
-  grant: (key: string, scopes: string[]) => Promise<void>
+  /** Create an extra project in the seeded user's org (no agent) — for org-scoping tests. */
+  makeProject: (name: string) => Promise<{ id: string }>
+  /** Request + approve scopes for an agent. Targets `projectId` when given, else the
+   * agent's default (sole) project. */
+  grant: (key: string, scopes: string[], projectId?: string) => Promise<void>
   /** Run the CLI in-process against the real (in-memory) app — exercises routing, the
    * database and scope enforcement without a socket (the sandbox firewall blocks real
    * fetch, even to localhost). */
@@ -155,8 +159,10 @@ export async function createCliHarness(): Promise<CliHarness> {
 
   // Treaty's response-body types collapse across the package boundary, so cast the
   // `.data` we read to its known runtime shape.
-  async function grant(key: string, scopes: string[]): Promise<void> {
-    const req = await api.agent.v1['scope-requests'].post({ scopes }, { headers: authHeader(key) })
+  async function grant(key: string, scopes: string[], projectId?: string): Promise<void> {
+    const body =
+      projectId === undefined ? { scopes } : { scopes, resourceType: 'project' as const, resourceId: projectId }
+    const req = await api.agent.v1['scope-requests'].post(body, { headers: authHeader(key) })
     const id = (req.data as { id: string } | null)?.id
     if (id === undefined) {
       throw new Error(`scope request failed: ${JSON.stringify(req.error?.value)}`)
@@ -164,12 +170,17 @@ export async function createCliHarness(): Promise<CliHarness> {
     await api.api['scope-requests']({ id }).approve.post()
   }
 
-  async function makeAgent(opts: MakeAgentOptions = {}): Promise<{ projectId: string; key: string }> {
-    const proj = await api.api.projects.post({ name: opts.projectName ?? 'cli-proj' })
+  async function makeProject(name: string): Promise<{ id: string }> {
+    const proj = await api.api.projects.post({ name })
     const projData = proj.data as { id: string } | null
     if (projData === null) {
       throw new Error(`createProject failed: ${JSON.stringify(proj.error?.value)}`)
     }
+    return projData
+  }
+
+  async function makeAgent(opts: MakeAgentOptions = {}): Promise<{ projectId: string; key: string }> {
+    const projData = await makeProject(opts.projectName ?? 'cli-proj')
     const agent = await api.api.projects({ id: projData.id }).agents.post({ name: opts.agentName ?? 'cli-agent' })
     const agentData = agent.data as { apiKey: string } | null
     if (agentData === null) {
@@ -223,5 +234,5 @@ export async function createCliHarness(): Promise<CliHarness> {
     await rm(homeDir, { recursive: true, force: true })
   }
 
-  return { ctx, homeDir, makeAgent, grant, run: runCli, spawn, reset, dispose }
+  return { ctx, homeDir, makeAgent, makeProject, grant, run: runCli, spawn, reset, dispose }
 }
