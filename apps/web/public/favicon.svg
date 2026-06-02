@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <!-- Walnut Cloud seam-ring favicon; adapts to the browser's light/dark chrome -->
+  <style>
+    :root { --ink: #8a6443; --seam: #a9805a; }
+    @media (prefers-color-scheme: dark) { :root { --ink: #a9805a; --seam: #c9a98a; } }
+  </style>
+  <circle cx="64" cy="64" r="42" stroke="var(--ink)" stroke-width="8"/>
+  <path d="M64 28 C73 45 53 54 64 64 C75 74 55 83 64 100" stroke="var(--seam)" stroke-width="8" stroke-linecap="round"/>
+</svg>

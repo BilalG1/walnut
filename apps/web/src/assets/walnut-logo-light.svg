@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-label="Walnut Cloud">
+  <!-- Seam-ring mark, tuned for light backgrounds -->
+  <circle cx="64" cy="64" r="42" stroke="#8a6443" stroke-width="6"/>
+  <path d="M64 30 C72 45 54 53 64 64 C74 75 56 83 64 98" stroke="#a9805a" stroke-width="6" stroke-linecap="round"/>
+  <path d="M50 50 C45 60 46 70 51 80" stroke="#a9805a" stroke-width="5" stroke-linecap="round" opacity=".6"/>
+  <path d="M78 50 C83 60 82 70 77 80" stroke="#a9805a" stroke-width="5" stroke-linecap="round" opacity=".6"/>
+</svg>

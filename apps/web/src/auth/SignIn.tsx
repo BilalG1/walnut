@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import githubLogo from '../assets/github.svg'
 import googleLogo from '../assets/google.svg'
+import walnutLogo from '../assets/walnut-logo-dark.svg'
 import { Button, Card } from '../components/ui.tsx'
 import { authConfig } from '../lib/auth/config.ts'
 import type { OAuthProvider } from '../lib/auth/oauth.ts'
@@ -35,7 +36,7 @@ export function SignIn() {
 
       <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center px-5 py-16">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <span className="text-3xl">🌰</span>
+          <img src={walnutLogo} alt="Walnut Cloud" className="h-12 w-12" />
           <h1 className="text-lg font-semibold tracking-tight text-neutral-50">Sign in to Walnut Cloud</h1>
           <p className="text-xs text-neutral-500">The agent-native cloud.</p>
         </div>
