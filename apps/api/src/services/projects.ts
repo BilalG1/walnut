@@ -101,8 +101,16 @@ export async function createProject(
   ctx: AppContext,
   userId: string,
   input: { name: string },
+  orgId?: string,
 ): Promise<Project> {
-  const organizationId = await getDefaultOrgId(ctx, userId)
+  // Create in the requested org (membership-checked) or fall back to the personal org.
+  let organizationId: string
+  if (orgId === undefined) {
+    organizationId = await getDefaultOrgId(ctx, userId)
+  } else {
+    await assertOrgMember(ctx, orgId, userId)
+    organizationId = orgId
+  }
   const [created] = await ctx.db
     .insert(projects)
     .values({

@@ -692,6 +692,22 @@ describe('organizations', () => {
     expect((await stranger.api.organizations({ orgId }).projects.get()).status).toBe(404)
     expect((await stranger.api.organizations({ orgId }).agents.get()).status).toBe(404)
   })
+
+  test('POST /api/organizations/:orgId/projects creates the project in that org', async () => {
+    const orgId = await personalOrgId()
+    const created = await h.api.api.organizations({ orgId }).projects.post({ name: 'in-org' })
+    expect(created.status).toBe(200)
+    expect(created.data?.name).toBe('in-org')
+    const list = await h.api.api.organizations({ orgId }).projects.get()
+    expect(list.data?.some((p) => p.id === created.data?.id)).toBe(true)
+  })
+
+  test('a non-member cannot create a project in an org (404)', async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('33333333-3333-3333-3333-333333333333', { email: 'stranger3@example.com' })
+    const res = await stranger.api.organizations({ orgId }).projects.post({ name: 'sneaky' })
+    expect(res.status).toBe(404)
+  })
 })
 
 describe('branches', () => {

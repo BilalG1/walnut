@@ -1,6 +1,8 @@
+import { QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App.tsx'
+import { queryClient } from './app/queryClient.ts'
+import { RootGate } from './app/RootGate.tsx'
 import { AuthProvider } from './auth/AuthProvider.tsx'
 import './index.css'
 
@@ -11,8 +13,10 @@ if (root === null) {
 
 createRoot(root).render(
   <StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <RootGate />
+      </AuthProvider>
+    </QueryClientProvider>
   </StrictMode>,
 )

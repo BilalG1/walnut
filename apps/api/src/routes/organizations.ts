@@ -1,10 +1,10 @@
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
-import { toOrgAgentView, toOrgProjectSummary, toOrgSummary } from '../serializers.ts'
+import { toOrgAgentView, toOrgProjectSummary, toOrgSummary, toProjectDetail } from '../serializers.ts'
 import { listOrgAgents } from '../services/agents.ts'
 import { listOrganizations } from '../services/organizations.ts'
-import { listOrgProjects } from '../services/projects.ts'
+import { createProject, listOrgProjects } from '../services/projects.ts'
 
 export function organizationRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/organizations' })
@@ -27,6 +27,11 @@ export function organizationRoutes(ctx: AppContext) {
         }),
       )
     })
+    .post(
+      '/:orgId/projects',
+      async ({ userId, params, body }) => toProjectDetail(await createProject(ctx, userId, body, params.orgId)),
+      { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
+    )
     .get('/:orgId/agents', async ({ userId, params }) => {
       const rows = await listOrgAgents(ctx, params.orgId, userId)
       return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectName))
