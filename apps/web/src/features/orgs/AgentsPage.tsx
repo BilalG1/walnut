@@ -1,8 +1,11 @@
-import { Avatar, Badge, Card, Spinner } from '@walnut/ui'
+import { Plus } from '@walnut/icons'
+import { Avatar, Badge, Button, Card, Spinner } from '@walnut/ui'
+import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
-import { useOrgAgents } from '../../data/queries.ts'
+import { useOrgAgents, useOrgProjects } from '../../data/queries.ts'
 import { scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
+import { CreateAgentDialog } from './CreateAgentDialog.tsx'
 
 /** Org-wide agent roster — the single source of truth for identities in the org. */
 export function AgentsPage() {
@@ -15,14 +18,29 @@ export function AgentsPage() {
 
 function AgentsView({ orgId }: { orgId: string }) {
   const { data, isPending, error } = useOrgAgents(orgId)
+  const projects = useOrgProjects(orgId)
+  const [createOpen, setCreateOpen] = useState(false)
   const rows = data ?? []
+  const activeProjects = (projects.data ?? [])
+    .filter((p) => p.status === 'active')
+    .map((p) => ({ id: p.id, name: p.name }))
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
-      <p className="mt-1 text-sm text-neutral-500">
-        Every agent identity in this organization — grant each one access per project.
-      </p>
+      <div className="flex items-start gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
+          <p className="mt-1 text-sm text-neutral-500">
+            Every agent identity in this organization — grant each one access per project.
+          </p>
+        </div>
+        <Button className="ml-auto" onClick={() => setCreateOpen(true)}>
+          <Plus size={15} />
+          New agent
+        </Button>
+      </div>
+
+      <CreateAgentDialog orgId={orgId} projects={activeProjects} open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <div className="mt-6">
         {isPending ? (
