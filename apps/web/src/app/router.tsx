@@ -6,7 +6,10 @@ import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
+import { ActivityPage } from '../features/projects/ActivityPage.tsx'
+import { DatabasePage } from '../features/projects/DatabasePage.tsx'
 import { OverviewPage } from '../features/projects/OverviewPage.tsx'
+import { ProjectSettingsPage } from '../features/projects/SettingsPage.tsx'
 import { queryClient } from './queryClient.ts'
 
 const rootRoute = createRootRoute({ component: AppLayout })
@@ -44,20 +47,12 @@ const orgSettingsRoute = createRoute({
 // Project / branch scope ----------------------------------------------------
 const projectRoute = createRoute({ getParentRoute: () => orgRoute, path: 'projects/$projectId/branches/$branch' })
 const projectIndexRoute = createRoute({ getParentRoute: () => projectRoute, path: '/', component: OverviewPage })
-const projectDatabaseRoute = createRoute({
-  getParentRoute: () => projectRoute,
-  path: 'database',
-  component: () => <PlaceholderPage title="Database" />,
-})
-const projectActivityRoute = createRoute({
-  getParentRoute: () => projectRoute,
-  path: 'activity',
-  component: () => <PlaceholderPage title="Activity" />,
-})
+const projectDatabaseRoute = createRoute({ getParentRoute: () => projectRoute, path: 'database', component: DatabasePage })
+const projectActivityRoute = createRoute({ getParentRoute: () => projectRoute, path: 'activity', component: ActivityPage })
 const projectSettingsRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'settings',
-  component: () => <PlaceholderPage title="Branch settings" />,
+  component: ProjectSettingsPage,
 })
 
 const routeTree = rootRoute.addChildren([

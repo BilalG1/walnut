@@ -63,6 +63,24 @@ export function useProject(projectId: string) {
   })
 }
 
+export function useActivity(projectId: string) {
+  return useQuery({
+    queryKey: keys.activity(projectId),
+    queryFn: () => unwrap(api.api.projects({ id: projectId }).activity.get()),
+  })
+}
+
+/** Delete a project, then refresh the org's project list. */
+export function useDeleteProject(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (projectId: string) => unwrap(api.api.projects({ id: projectId }).delete()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
+    },
+  })
+}
+
 /** Create a project in the currently-viewed org and refresh that org's list. */
 export function useCreateProject(orgId: string) {
   const qc = useQueryClient()

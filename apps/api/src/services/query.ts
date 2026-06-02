@@ -51,7 +51,8 @@ export async function runAgentQuery(project: Project, grant: AgentGrant, sql: st
     result = await runSql(connectionUri, sql)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Query failed'
-    throw new HttpError(400, { error: 'query_error', message })
+    // Carry the classified scopes so the activity log records them on the error event too.
+    throw new HttpError(400, { error: 'query_error', message, requiredScopes: classification.requiredScopes })
   }
 
   return { ...result, requiredScopes: classification.requiredScopes }

@@ -783,12 +783,22 @@ describe('activity', () => {
     const ok = await h.api.agent.v1.query.post({ sql: 'select 1 as x' }, { headers: bearer(agent.apiKey) })
     expect(ok.status).toBe(200)
 
+    // An engine error: valid SQL, missing table, with sufficient scope -> status 'error'.
+    const errored = await h.api.agent.v1.query.post(
+      { sql: 'select * from definitely_missing_table' },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(errored.status).toBe(400)
+
     const res = await h.api.api.projects({ id: project.id }).activity.get()
     expect(res.status).toBe(200)
     const statuses = (res.data ?? []).map((e) => e.status)
     expect(statuses).toContain('ok')
     expect(statuses).toContain('denied')
+    expect(statuses).toContain('error')
     expect(res.data?.find((e) => e.status === 'ok')?.agentName).toBe('act-bot')
+    // The error event still records the classified scopes (a SELECT needs db:read).
+    expect(res.data?.find((e) => e.status === 'error')?.requiredScopes).toContain('db:read')
   })
 
   test('activity of an inaccessible project is 404', async () => {
