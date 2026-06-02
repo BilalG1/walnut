@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { scopeLabel, timeAgo } from '../src/lib/format.ts'
+import { resourceTargetLabel, scopeLabel, timeAgo } from '../src/lib/format.ts'
 
 describe('scopeLabel', () => {
   test('maps known scopes to short labels', () => {
@@ -11,6 +11,22 @@ describe('scopeLabel', () => {
 
   test('passes through unknown scopes', () => {
     expect(scopeLabel('email:send')).toBe('email:send')
+  })
+})
+
+describe('resourceTargetLabel', () => {
+  test('uses the resolved project name for a project target', () => {
+    expect(resourceTargetLabel('project', 'analytics')).toBe('analytics')
+  })
+
+  test('falls back to a dash when a project name is unknown', () => {
+    expect(resourceTargetLabel('project', null)).toBe('—')
+  })
+
+  test('labels org and branch targets', () => {
+    expect(resourceTargetLabel('org', null)).toBe('the organization')
+    expect(resourceTargetLabel('branch', 'analytics')).toBe('analytics')
+    expect(resourceTargetLabel('branch', null)).toBe('a branch')
   })
 })
 

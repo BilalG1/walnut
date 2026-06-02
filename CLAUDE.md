@@ -76,17 +76,26 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 
 ## The agent model (the point of the project)
 
-- **Agents** belong to a project and start with **zero scopes**. They authenticate to the
-  agent-facing API with a bearer key (`/agent/v1/*`); only a SHA-256 hash is stored.
+- **Agents** belong to an **organization** (`agents.organization_id`), created homed on a
+  project (where they get an initial zero-scope grant) and able to hold/request access to any
+  project in the org. They authenticate to the agent-facing API with a bearer key (`/agent/v1/*`);
+  only a SHA-256 hash is stored. The agent CLI (`apps/cli`) targets a project with `--project`
+  (defaulting to the agent's sole project, erroring `ambiguous_project` if several) and discovers
+  ids via `walnut project ls`.
 - **Scopes** are strings, currently DB-only: `db:read`, `db:write`, `db:delete`, `db:ddl`
   (defined in `packages/core/src/scopes.ts`). The union type is deliberately open so future
-  domains (`fn:deploy`, `email:send`, `logs:read`) drop in without a schema change.
+  domains (`fn:deploy`, `email:send`, `logs:read`) drop in without a schema change. A grant is
+  anchored to a **resource** — `org`, `project`, or `branch` (`GrantResourceType`) — and
+  `SCOPES_BY_RESOURCE` gates which scopes are grantable where: `db:*` only at project/branch (a
+  database lives there), never at the `org` level, which is reserved vocabulary for future
+  org-wide non-database scopes.
 - **Enforcement is two layers (defense in depth):**
-  1. **Engine boundary (primary):** each agent gets its own restricted Postgres **login role**,
-     a member of four per-project `NOLOGIN` group roles (`_read/_write/_delete/_ddl`). Agent
-     queries run over the **agent's scoped connection** (`agents.connection_uri`), never the
-     project owner connection, so the database itself refuses anything ungranted. Role lifecycle
-     lives in `packages/core/src/roles.ts`; approval/denial = `GRANT`/`REVOKE` group membership.
+  1. **Engine boundary (primary):** each (agent, resource) grant gets its own restricted Postgres
+     **login role**, a member of four per-project `NOLOGIN` group roles (`_read/_write/_delete/_ddl`).
+     Agent queries run over the **grant's scoped connection** (`agent_grants.connection_uri`,
+     provisioned lazily on first approval for a resource), never the project owner connection, so
+     the database itself refuses anything ungranted. Role lifecycle lives in
+     `packages/core/src/roles.ts`; approval/denial = `GRANT`/`REVOKE` group membership.
   2. **Classifier (first guard + UX):** `POST /agent/v1/query` runs `classifySql`
      (`packages/core/src/sql.ts`), which parses with the **real PostgreSQL grammar**
      (`pgsql-parser`/libpg_query) and maps each statement's AST to the scope(s) it needs. Missing
@@ -94,9 +103,11 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
      to request it. This drives the approval loop; it can now fail open without being a breach
      because the engine enforces — but it still **fails safe** (unknown/unparsed statement →
      `db:ddl`) so it never under-reports.
-- **Approval loop:** an agent calls `POST /agent/v1/scope-requests`; the request appears as a
-  dashboard notification; the user approves/denies (`/api/scope-requests/:id/approve|deny`).
-  Approval merges the scopes into the agent **and** syncs its Postgres role memberships.
+- **Approval loop:** an agent calls `POST /agent/v1/scope-requests` (targeting a resource, or
+  defaulting to its sole project); the request appears as a dashboard notification; the user
+  approves/denies (`/api/scope-requests/:id/approve|deny`). Approval merges the scopes into the
+  agent's grant for that resource (creating the grant + role if it's the first) **and** syncs its
+  Postgres role memberships.
 - **The classifier** is multi-statement and writable-CTE aware and handles the nasty cases —
   `EXPLAIN ANALYZE` (which *executes*), `SELECT … INTO` (a CTAS), `SET ROLE`, `COPY … FROM PROGRAM`,
   `MERGE`, comments, string/dollar-quote literals — by working from the AST, not a token scan.

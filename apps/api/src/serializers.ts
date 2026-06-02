@@ -121,14 +121,35 @@ export function toOrgProjectSummary(
   return { ...toProjectSummary(p), ...extra }
 }
 
-/** An agent in the org-wide roster: its view plus the name of its home project (null if
- * it holds no project grant). */
-export interface OrgAgentView extends AgentView {
+/** One of an agent's grants, as shown in the org roster: the resource it applies to (with
+ * a resolved project name when known) and the scopes held there. */
+export interface OrgAgentGrantView {
+  resourceType: string
+  resourceId: string
   projectName: string | null
+  scopes: string[]
 }
 
-export function toOrgAgentView(agent: Agent, grants: readonly AgentGrant[], projectName: string | null): OrgAgentView {
-  return { ...toAgentView(agent, grants), projectName }
+/** An agent in the org-wide roster: its view plus a per-resource breakdown of its access
+ * (an org-scoped agent may reach several projects, each with its own scopes). */
+export interface OrgAgentView extends AgentView {
+  grants: OrgAgentGrantView[]
+}
+
+export function toOrgAgentView(
+  agent: Agent,
+  grants: readonly AgentGrant[],
+  projectNames: Readonly<Record<string, string>>,
+): OrgAgentView {
+  return {
+    ...toAgentView(agent, grants),
+    grants: grants.map((g) => ({
+      resourceType: g.resourceType,
+      resourceId: g.resourceId,
+      projectName: projectNames[g.resourceId] ?? null,
+      scopes: g.scopes,
+    })),
+  }
 }
 
 export interface BranchView {

@@ -16,6 +16,18 @@ export function scopeDescription(scope: string): string {
   return isAgentScope(scope) ? SCOPE_DESCRIPTIONS[scope] : scope
 }
 
+/** Human label for a scope request's target resource, given the resolved project name
+ * (when the resource is a project/branch). Org-scoped agents can target any of these. */
+export function resourceTargetLabel(resourceType: string, projectName: string | null): string {
+  if (resourceType === 'org') {
+    return 'the organization'
+  }
+  if (resourceType === 'branch') {
+    return projectName ?? 'a branch'
+  }
+  return projectName ?? '—'
+}
+
 /** Hide the password in a postgres connection string for on-screen display.
  * The full URI is still copied verbatim; this is display-only. */
 export function maskConnectionUri(uri: string): string {

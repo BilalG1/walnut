@@ -56,40 +56,50 @@ function AgentsView({ orgId }: { orgId: string }) {
               <thead>
                 <tr className="border-b border-neutral-800 text-left text-neutral-500">
                   <th className="px-4 py-2.5 font-medium">Agent</th>
-                  <th className="px-4 py-2.5 font-medium">Project</th>
-                  <th className="px-4 py-2.5 font-medium">Access</th>
+                  <th className="px-4 py-2.5 font-medium">Access by project</th>
                   <th className="px-4 py-2.5 text-right font-medium">Created</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800">
-                {rows.map((a) => (
-                  <tr key={a.id} className="hover:bg-neutral-900/50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar label={a.name} size={28} gradient="from-sky-500 to-indigo-600" />
-                        <div>
-                          <div className="font-medium">{a.name}</div>
-                          <div className="font-mono text-[11px] text-neutral-500">{a.keyPrefix}</div>
+                {rows.map((a) => {
+                  const projectGrants = a.grants.filter((g) => g.resourceType === 'project')
+                  return (
+                    <tr key={a.id} className="hover:bg-neutral-900/50 align-top">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <Avatar label={a.name} size={28} gradient="from-sky-500 to-indigo-600" />
+                          <div>
+                            <div className="font-medium">{a.name}</div>
+                            <div className="font-mono text-[11px] text-neutral-500">{a.keyPrefix}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-neutral-400">{a.projectName ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      {a.scopes.length === 0 ? (
-                        <span className="text-xs text-neutral-500">no scopes</span>
-                      ) : (
-                        <span className="flex flex-wrap gap-1">
-                          {a.scopes.map((s) => (
-                            <Badge key={s} tone={scopeTone(s)} mono>
-                              {scopeLabel(s)}
-                            </Badge>
-                          ))}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right text-xs text-neutral-500">{timeAgo(a.createdAt)}</td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3">
+                        {projectGrants.length === 0 ? (
+                          <span className="text-xs text-neutral-500">no access</span>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {projectGrants.map((g) => (
+                              <div key={g.resourceId} className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-neutral-400">{g.projectName ?? g.resourceId}</span>
+                                {g.scopes.length === 0 ? (
+                                  <span className="text-xs text-neutral-600">no scopes</span>
+                                ) : (
+                                  g.scopes.map((s) => (
+                                    <Badge key={s} tone={scopeTone(s)} mono>
+                                      {scopeLabel(s)}
+                                    </Badge>
+                                  ))
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs text-neutral-500">{timeAgo(a.createdAt)}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </Card>

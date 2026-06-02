@@ -161,9 +161,10 @@ export async function listAgents(ctx: AppContext, projectId: string, userId: str
   return rows.map((agent) => ({ agent, grants: grants.get(agent.id) ?? [] }))
 }
 
-/** An org-wide agent row: the agent, its grants, and the name of its home project. */
+/** An org-wide agent row: the agent, its grants, and the names of the projects those
+ * grants resolve to (keyed by resource id). */
 export interface OrgAgentRow extends AgentWithGrants {
-  projectName: string | null
+  projectNames: Record<string, string>
 }
 
 /** Every agent in the organization (caller must be a member). */
@@ -189,8 +190,14 @@ export async function listOrgAgents(ctx: AppContext, orgId: string, userId: stri
   const names = await projectNames(ctx, [...projectIds])
   return rows.map((agent) => {
     const list = grants.get(agent.id) ?? []
-    const home = list.filter((g) => g.resourceType === 'project').toSorted((a, b) => +a.createdAt - +b.createdAt)[0]
-    return { agent, grants: list, projectName: home === undefined ? null : (names.get(home.resourceId) ?? null) }
+    const record: Record<string, string> = {}
+    for (const g of list) {
+      const name = names.get(g.resourceId)
+      if (name !== undefined) {
+        record[g.resourceId] = name
+      }
+    }
+    return { agent, grants: list, projectNames: record }
   })
 }
 

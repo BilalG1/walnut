@@ -14,7 +14,8 @@ interface CreatedAgent {
   apiKey: string
 }
 
-/** Create an agent in a chosen (active) project, then reveal its API key exactly once. */
+/** Create an org-scoped agent, homed on a chosen (active) project, then reveal its API key
+ * exactly once. The agent can later be granted access to other projects in the org. */
 export function CreateAgentDialog({
   orgId,
   projects,
@@ -109,7 +110,8 @@ export function CreateAgentDialog({
                 </select>
               </div>
               <p className="text-xs text-neutral-500">
-                The agent starts with no scopes — it requests access, and you approve it in Requests.
+                The agent joins this organization with no scopes, homed on this project. It
+                requests access — here or to other projects — and you approve it in Requests.
               </p>
             </>
           )}

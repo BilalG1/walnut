@@ -41,7 +41,7 @@ export function organizationRoutes(ctx: AppContext) {
     )
     .get('/:orgId/agents', async ({ userId, params }) => {
       const rows = await listOrgAgents(ctx, params.orgId, userId)
-      return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectName))
+      return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectNames))
     })
     .get(
       '/:orgId/requests',

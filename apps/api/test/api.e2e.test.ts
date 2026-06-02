@@ -773,14 +773,15 @@ describe('organizations', () => {
     expect(res.data?.find((p) => p.id === project.id)?.pendingRequestCount).toBe(1)
   })
 
-  test('GET /api/organizations/:orgId/agents is the org-wide roster with project names', async () => {
+  test('GET /api/organizations/:orgId/agents is the org-wide roster with per-project grants', async () => {
     const project = await newProject('roster')
     await newAgent(project.id, 'roster-bot')
     const orgId = await personalOrgId()
 
     const res = await h.api.api.organizations({ orgId }).agents.get()
     expect(res.status).toBe(200)
-    expect(res.data?.find((a) => a.name === 'roster-bot')?.projectName).toBe('roster')
+    const bot = res.data?.find((a) => a.name === 'roster-bot')
+    expect(bot?.grants.some((g) => g.resourceType === 'project' && g.projectName === 'roster')).toBe(true)
   })
 
   test('a non-member cannot read another org\'s projects or agents (404, no existence leak)', async () => {

@@ -1,8 +1,8 @@
 import { Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
-import { useOrgAgents, useOrgRequests, useResolveRequest } from '../../data/queries.ts'
-import { scopeLabel, timeAgo } from '../../lib/format.ts'
+import { useOrgAgents, useOrgProjects, useOrgRequests, useResolveRequest } from '../../data/queries.ts'
+import { resourceTargetLabel, scopeLabel, timeAgo } from '../../lib/format.ts'
 import { scopeTone } from '../../lib/tones.ts'
 
 const HIGH_IMPACT = new Set(['db:delete', 'db:ddl'])
@@ -19,8 +19,10 @@ export function RequestsPage() {
 function RequestsView({ orgId }: { orgId: string }) {
   const requests = useOrgRequests(orgId, 'pending')
   const agents = useOrgAgents(orgId)
+  const projects = useOrgProjects(orgId)
   const resolve = useResolveRequest(orgId)
   const agentById = new Map((agents.data ?? []).map((a) => [a.id, a]))
+  const projectById = new Map((projects.data ?? []).map((p) => [p.id, p.name]))
   const rows = requests.data ?? []
 
   return (
@@ -50,7 +52,9 @@ function RequestsView({ orgId }: { orgId: string }) {
                     </Badge>
                   ))}
                   <span className="text-neutral-500">in</span>
-                  <span className="text-neutral-300">{agent?.projectName ?? '—'}</span>
+                  <span className="text-neutral-300">
+                    {resourceTargetLabel(r.resourceType, projectById.get(r.resourceId) ?? null)}
+                  </span>
                   <span className="ml-auto text-xs text-neutral-500">{timeAgo(r.createdAt)}</span>
                 </div>
                 {r.reason !== null ? <p className="mt-1.5 text-sm text-neutral-300">&ldquo;{r.reason}&rdquo;</p> : null}
