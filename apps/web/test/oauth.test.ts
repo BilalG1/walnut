@@ -80,4 +80,35 @@ describe('completeOAuthSignIn', () => {
     // The single-use state entry is consumed.
     expect(sessionStorage.getItem('walnut.oauth.st')).toBeNull()
   })
+
+  test('restores a stashed deep-link return path after a successful exchange', async () => {
+    sessionStorage.setItem(
+      'walnut.oauth.st',
+      JSON.stringify({ verifier: 'v', redirectUri: 'https://app.example/oauth-callback' }),
+    )
+    sessionStorage.setItem('walnut.auth.returnTo', '/invite/wln_inv_abc')
+    setCallbackUrl('?code=c&state=st')
+    globalThis.fetch = (async () => Response.json({ access_token: 'AT', refresh_token: 'RT' })) as unknown as typeof fetch
+
+    await completeOAuthSignIn()
+
+    // The router will mount on the deep link the visitor started from, not the home redirect.
+    expect(window.location.pathname).toBe('/invite/wln_inv_abc')
+    expect(sessionStorage.getItem('walnut.auth.returnTo')).toBeNull()
+  })
+
+  test('ignores an unsafe return path (open-redirect guard) and lands on root', async () => {
+    sessionStorage.setItem(
+      'walnut.oauth.st',
+      JSON.stringify({ verifier: 'v', redirectUri: 'https://app.example/oauth-callback' }),
+    )
+    sessionStorage.setItem('walnut.auth.returnTo', '//evil.example/phish')
+    setCallbackUrl('?code=c&state=st')
+    globalThis.fetch = (async () => Response.json({ access_token: 'AT', refresh_token: 'RT' })) as unknown as typeof fetch
+
+    await completeOAuthSignIn()
+
+    expect(window.location.pathname).toBe('/')
+    expect(window.location.host).toBe('localhost')
+  })
 })

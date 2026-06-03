@@ -6,7 +6,38 @@ import { setTokens } from './tokens.ts'
 export type OAuthProvider = 'google' | 'github'
 
 const STORAGE_PREFIX = 'walnut.oauth.'
+// Deliberately outside STORAGE_PREFIX so pruneOAuthState() (which clears per-flow verifiers)
+// never wipes the pending return path.
+const RETURN_TO_KEY = 'walnut.auth.returnTo'
 export const OAUTH_CALLBACK_PATH = '/oauth-callback'
+
+/** A safe same-origin path to return to after sign-in, or null. Guards against open-redirects
+ * (protocol-relative `//host`, absolute URLs) and pointless round-trips (root / the callback). */
+function sanitizeReturnTo(path: string): string | null {
+  if (!path.startsWith('/') || path.startsWith('//')) {
+    return null
+  }
+  if (path === '/' || path.startsWith(OAUTH_CALLBACK_PATH)) {
+    return null
+  }
+  return path
+}
+
+/** Remember where to land after the OAuth round-trip — e.g. an `/invite/:token` deep link a
+ * logged-out visitor opened. Stored in sessionStorage so it survives the provider redirect. */
+function rememberReturnTo(path: string): void {
+  const safe = sanitizeReturnTo(path)
+  if (safe !== null) {
+    sessionStorage.setItem(RETURN_TO_KEY, safe)
+  }
+}
+
+/** Consume the stored return path (default `/`). Single-use, so a later sign-in won't reuse it. */
+function takeReturnTo(): string {
+  const path = sessionStorage.getItem(RETURN_TO_KEY)
+  sessionStorage.removeItem(RETURN_TO_KEY)
+  return path === null ? '/' : (sanitizeReturnTo(path) ?? '/')
+}
 
 interface PendingOAuth {
   verifier: string
@@ -62,6 +93,9 @@ export function buildAuthorizeUrl(opts: {
  */
 export async function signInWithOAuth(provider: OAuthProvider): Promise<void> {
   pruneOAuthState() // clear any leftovers from earlier abandoned flows
+  // Capture where we are now (the sign-in is rendered in place of the route the visitor
+  // requested) so we can return there after the round-trip.
+  rememberReturnTo(window.location.pathname + window.location.search)
   const verifier = generateCodeVerifier()
   const state = generateState()
   const codeChallenge = await computeCodeChallenge(verifier)
@@ -148,4 +182,13 @@ export async function completeOAuthSignIn(): Promise<void> {
     throw new Error('Sign-in returned an unexpected response.')
   }
   setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token })
+
+  // Restore the deep link the visitor started from (e.g. an invite link), so RootGate mounts the
+  // router on that route rather than the home redirect. setTokens' state update is batched, so this
+  // replaceState lands before the router first reads the URL. Only on success — a failed exchange
+  // leaves the callback page to show its error.
+  const returnTo = takeReturnTo()
+  if (returnTo !== '/') {
+    window.history.replaceState(null, '', `${window.location.origin}${returnTo}`)
+  }
 }

@@ -104,6 +104,28 @@ export function useRevokeInvitation(orgId: string) {
   })
 }
 
+/** Preview an invite link before redeeming it: the org + role it grants, whether it's still
+ * valid, and whether you're already a member. No retry — a 404 means an unknown/dead token. */
+export function useInvitePreview(token: string) {
+  return useQuery({
+    queryKey: keys.invitePreview(token),
+    queryFn: () => unwrap(api.api.invitations({ token }).get()),
+    retry: false,
+  })
+}
+
+/** Redeem an invite link: join the signed-in user to the org. Returns `{ organizationId }` so the
+ * caller can navigate there; refreshes the org list so the new org appears in the switcher. */
+export function useAcceptInvite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (token: string) => unwrap(api.api.invitations({ token }).accept.post()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgs() })
+    },
+  })
+}
+
 export function useOrgRequests(
   orgId: string,
   status: 'pending' | 'approved' | 'denied',
