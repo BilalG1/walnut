@@ -12,6 +12,12 @@ export function newAgentKey(): string {
   return `wln_agt_${randomBytes(24).toString('hex')}`
 }
 
+/** A fresh organization-invite token. Like an agent key, it's shown once (in the invite
+ * link) and only its hash is stored, so a link can never be re-derived after creation. */
+export function newInviteToken(): string {
+  return `wln_inv_${randomBytes(24).toString('hex')}`
+}
+
 export function hashKey(key: string): string {
   return createHash('sha256').update(key).digest('hex')
 }
