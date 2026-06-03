@@ -20,12 +20,13 @@ export type { SqlClassification } from './sql.ts'
 
 export { SYSTEM_USER_ID, newId, newAgentKey, newInviteToken, hashKey, keyPrefix, newDatabaseName } from './ids.ts'
 
-export { createProvider } from './provider/index.ts'
+export { createProvider, ProviderError, classifyProviderStatus } from './provider/index.ts'
 export type {
   CreateBranchInput,
   DatabaseProvider,
   DestroyBranchInput,
   ProviderConfig,
+  ProviderErrorReason,
   ProviderKind,
   ProvisionedDatabase,
   ProvisionedProject,

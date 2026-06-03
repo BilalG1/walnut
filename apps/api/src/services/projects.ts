@@ -1,10 +1,29 @@
-import { type ProvisionedDatabase, type ProvisionedProject, RESOURCE_LIMITS, setupProjectRoles } from '@walnut/core'
+import {
+  ProviderError,
+  type ProvisionedDatabase,
+  type ProvisionedProject,
+  RESOURCE_LIMITS,
+  setupProjectRoles,
+} from '@walnut/core'
 import { agentGrants, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
 import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { badRequest, HttpError, limitExceeded, notFound } from '../errors.ts'
+import { badRequest, HttpError, limitExceeded, notFound, providerCapacity } from '../errors.ts'
 import { enforceRate } from '../rate-limit.ts'
 import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
+
+/** Map a failed provider provision to the right HTTP error. The shared account hitting its own
+ * quota is a 503 platform-capacity condition (the tenant can't fix it); everything else is a
+ * generic 502 the caller can retry. `what` labels the resource in the generic message. */
+function provisioningError(err: unknown, what: string): HttpError {
+  if (err instanceof ProviderError && err.reason === 'account_limit') {
+    return providerCapacity(
+      `The platform is at capacity (the database provider account hit its own quota). Please try again later.`,
+    )
+  }
+  const message = err instanceof Error ? err.message : 'Unknown provisioning error'
+  return new HttpError(502, { error: 'provisioning_failed', message: `Failed to provision ${what}: ${message}` })
+}
 
 /** Burst-limit a provisioning op (create/delete project or branch). Per-user keeps one tenant
  * from storming; the shared `global` bucket shields the single Neon account's API rate limit
@@ -240,18 +259,29 @@ export async function createProject(
     const message = err instanceof Error ? err.message : 'Unknown provisioning error'
     // If the database was created but a later step failed, tear it down so we don't leak an
     // orphaned database. A container provider (Neon) is torn down whole; a flat provider (local)
-    // by its branch database.
+    // by its branch database. If teardown *also* fails (provider still down), don't lose the
+    // provider ids with the local variable — persist them on the errored rows so the orphan is
+    // reconcilable rather than silently leaked.
+    let leakedProjectId: string | null = null
+    let leakedBranchId: string | null = null
     if (provisioned !== undefined) {
-      await teardownProvider(ctx, provisioned.providerProjectId, [provisioned.defaultBranch.providerBranchId]).catch(
-        (e) => console.error(`Failed to clean up orphaned database for project ${created.id}:`, e),
-      )
+      try {
+        await teardownProvider(ctx, provisioned.providerProjectId, [provisioned.defaultBranch.providerBranchId])
+      } catch (teardownErr) {
+        console.error(`Failed to clean up orphaned database for project ${created.id}:`, teardownErr)
+        leakedProjectId = provisioned.providerProjectId
+        leakedBranchId = provisioned.defaultBranch.providerBranchId
+      }
     }
-    await ctx.db.update(projects).set({ status: 'error', error: message }).where(eq(projects.id, created.id))
-    await ctx.db.update(branches).set({ status: 'error', error: message }).where(eq(branches.id, mainBranch.id))
-    throw new HttpError(502, {
-      error: 'provisioning_failed',
-      message: `Failed to provision database: ${message}`,
-    })
+    await ctx.db
+      .update(projects)
+      .set({ status: 'error', error: message, providerProjectId: leakedProjectId })
+      .where(eq(projects.id, created.id))
+    await ctx.db
+      .update(branches)
+      .set({ status: 'error', error: message, providerBranchId: leakedBranchId })
+      .where(eq(branches.id, mainBranch.id))
+    throw provisioningError(err, 'database')
   }
 }
 
@@ -438,17 +468,35 @@ export async function createBranch(
     return updated ?? created
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown provisioning error'
+    let leaked = false
     if (provisioned !== undefined) {
-      await ctx.provider
-        .destroyBranch({ providerProjectId: project.providerProjectId, providerBranchId: provisioned.providerBranchId })
-        .catch((e) => console.error(`Failed to clean up orphaned branch database for project ${projectId}:`, e))
+      try {
+        await ctx.provider.destroyBranch({
+          providerProjectId: project.providerProjectId,
+          providerBranchId: provisioned.providerBranchId,
+        })
+      } catch (teardownErr) {
+        console.error(`Failed to clean up orphaned branch database for project ${projectId}:`, teardownErr)
+        leaked = true
+      }
     }
-    // Drop the row so the name is free to retry (the branch never became usable).
-    await ctx.db.delete(branches).where(eq(branches.id, created.id))
-    throw new HttpError(502, {
-      error: 'provisioning_failed',
-      message: `Failed to provision branch database: ${message}`,
-    })
+    if (leaked && provisioned !== undefined) {
+      // Teardown failed — keep the row as an errored branch holding the provider id, so the
+      // orphaned database stays tracked (and the name claimed) rather than silently leaked.
+      await ctx.db
+        .update(branches)
+        .set({
+          status: 'error',
+          error: message,
+          providerBranchId: provisioned.providerBranchId,
+          connectionUri: provisioned.connectionUri,
+        })
+        .where(eq(branches.id, created.id))
+    } else {
+      // Nothing leaked — drop the row so the name is free to retry (the branch never became usable).
+      await ctx.db.delete(branches).where(eq(branches.id, created.id))
+    }
+    throw provisioningError(err, 'branch database')
   }
 }
 

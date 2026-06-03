@@ -2,6 +2,9 @@ import { createLocalProvider } from './local.ts'
 import { createNeonProvider } from './neon.ts'
 import type { DatabaseProvider, ProviderKind } from './types.ts'
 
+export { ProviderError, classifyProviderStatus } from './errors.ts'
+export type { ProviderErrorReason } from './errors.ts'
+
 export type {
   CreateBranchInput,
   DatabaseProvider,

@@ -38,3 +38,10 @@ export function badRequest(message: string): HttpError {
 export function limitExceeded(message: string, info: LimitExceededInfo): HttpError {
   return new HttpError(403, { error: 'limit_exceeded', message, ...info })
 }
+
+/** The database-provider *account* (the one shared Neon account) hit its own quota — a
+ * platform-capacity condition the tenant can't fix by holding fewer resources. 503, distinct
+ * from the per-org `limit_exceeded` (403): this is "the platform is full", not "you are". */
+export function providerCapacity(message: string): HttpError {
+  return new HttpError(503, { error: 'provider_capacity', message })
+}
