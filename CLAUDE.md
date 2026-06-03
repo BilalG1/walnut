@@ -1,9 +1,10 @@
 # Walnut Cloud
 
 An **agent-native cloud** — like AWS/Cloudflare but built for AI agents, not human
-developers. The MVP offers one primitive: a Postgres database per project, exposed
-to agents through **scoped access** with a human approval loop. It's designed to grow
-(serverless functions, storage, logs, email, …) without reshaping the core model.
+developers. The MVP offers one primitive: a Postgres database per **branch** (a project
+is a container of branches), exposed to agents through **scoped access** with a human
+approval loop. It's designed to grow (serverless functions, storage, logs, email, …)
+without reshaping the core model.
 
 ## Stack
 
@@ -11,8 +12,10 @@ to agents through **scoped access** with a human approval loop. It's designed to
 - **Frontend** (`apps/web`): Vite + React 19 + Tailwind v4 (`@tailwindcss/vite`).
 - **Backend** (`apps/api`): Elysia + Eden treaty (type-safe RPC end to end).
 - **DB:** Postgres + Drizzle ORM. Platform metadata DB via docker-compose.
-- **Per-project DBs:** provisioned via a `DatabaseProvider` — `neon` (real Neon API)
-  or `local` (a database on the docker Postgres; used by tests and offline dev).
+- **Per-branch DBs:** each branch is its own database, provisioned via a `DatabaseProvider`
+  — `neon` (a Neon project containing copy-on-write branches) or `local` (a database per
+  branch on the docker Postgres, branches cloned via `CREATE DATABASE … TEMPLATE`; used by
+  tests and offline dev).
 - **Lint:** oxlint (strict). **Typecheck:** tsgo (`@typescript/native-preview`).
 
 ## Layout
@@ -21,8 +24,9 @@ to agents through **scoped access** with a human approval loop. It's designed to
 apps/
   api/   Elysia app. routes/ (dashboard + agent-facing), services/, serializers, app.ts
   web/   React dashboard. components/, hooks.ts, lib/, api.ts (Eden client)
+  cli/   Agent CLI (`walnut`) over the agent-facing API: whoami, project/branch ls, db query, scope
 packages/
-  core/  scopes, SQL scope-classifier, db provider (neon/local), runSql — pure-ish, no app deps
+  core/  scopes, SQL scope-classifier, db provider (neon/local), roles, runSql — pure-ish, no app deps
   db/    Drizzle schema + client + migrations (drizzle/)
 ```
 
@@ -99,8 +103,8 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
   dashboard data by org membership, never a bare `userId`. `SYSTEM_USER_ID` lives on only
   as the seeded dev/test identity. Local sign-in without OAuth: `AUTH_DEV_BYPASS` +
   `POST /dev/auth/login` (dev-only, fails closed in prod). Frontend: `apps/web/src/auth`
-  (Google/GitHub PKCE + dev-login). Projects get an inert `main` **branch** on creation
-  (vocabulary for future branching; no per-branch DB/role yet).
+  (Google/GitHub PKCE + dev-login). Projects get a `main` **branch** on creation; each branch
+  has its own provisioned database and scoped roles, and is the unit agents are granted/run against.
   - **To sign in for local testing / browser automation, just use the dev-login.** Don't
     build a fake/throwaway auth server or stub the verifier — the real backend already
     gives you a one-click sign-in. The running web app shows a small **"dev login" form
@@ -125,25 +129,29 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 
 - **Agents** belong to an **organization** (`agents.organization_id`), created at the org level
   (`POST /api/organizations/:orgId/agents`) and **born with zero grants** — they request access to
-  any project (or branch) in the org, and a scoped Postgres role is provisioned on first approval.
-  They authenticate to the agent-facing API with a bearer key (`/agent/v1/*`); only a SHA-256 hash
-  is stored. The agent CLI (`apps/cli`) targets a project with `--project` (defaulting to the
-  agent's sole project, or the org's sole project when it has no grants yet; erroring
-  `ambiguous_project` if several) and discovers ids via `walnut project ls`.
+  any project (or branch) in the org. They authenticate to the agent-facing API with a bearer key
+  (`/agent/v1/*`); only a SHA-256 hash is stored. The agent CLI (`apps/cli`) targets a project with
+  `--project` and a branch with `--branch` (defaulting to the agent's sole project and that
+  project's `main` branch; erroring `ambiguous_project` if several) and discovers ids/names via
+  `walnut project ls` / `walnut branch ls`.
 - **Scopes** are strings, currently DB-only: `db:read`, `db:write`, `db:delete`, `db:ddl`
   (defined in `packages/core/src/scopes.ts`). The union type is deliberately open so future
   domains (`fn:deploy`, `email:send`, `logs:read`) drop in without a schema change. A grant is
   anchored to a **resource** — `org`, `project`, or `branch` (`GrantResourceType`) — and
-  `SCOPES_BY_RESOURCE` gates which scopes are grantable where: `db:*` only at project/branch (a
-  database lives there), never at the `org` level, which is reserved vocabulary for future
-  org-wide non-database scopes.
+  `SCOPES_BY_RESOURCE` gates which scopes are grantable where: `db:*` at project or branch — a
+  project grant **cascades to every branch**, a branch grant covers just that branch — never at the
+  `org` level, which is reserved vocabulary for future org-wide non-database scopes. An agent's
+  effective scopes on a branch are the expiry-filtered union over that grant chain.
 - **Enforcement is two layers (defense in depth):**
-  1. **Engine boundary (primary):** each (agent, resource) grant gets its own restricted Postgres
-     **login role**, a member of four per-project `NOLOGIN` group roles (`_read/_write/_delete/_ddl`).
-     Agent queries run over the **grant's scoped connection** (`agent_grants.connection_uri`,
-     provisioned lazily on first approval for a resource), never the project owner connection, so
-     the database itself refuses anything ungranted. Role lifecycle lives in
-     `packages/core/src/roles.ts`; approval/denial = `GRANT`/`REVOKE` group membership.
+  1. **Engine boundary (primary):** enforcement is keyed by **scope set, not by agent**. Each branch
+     database has four `NOLOGIN` group roles (`_read/_write/_delete/_ddl`) plus, provisioned lazily
+     on first use, up to 2⁴ shared `LOGIN` **scope roles** — each a member of exactly the group roles
+     for one scope subset, cached in `branch_db_roles` keyed by `(branch, scopeKey)`. A query computes
+     the agent's effective scopes for the target branch and runs over that branch's matching scope-role
+     connection — never the owner connection — so the database itself refuses anything ungranted. Role
+     lifecycle lives in `packages/core/src/roles.ts` (`ensureScopeRole`); a grant carries no Postgres
+     role, so approval/denial/expiry are pure metadata and a scope change just selects a different
+     (lesser/greater) connection — there's no per-agent role to reconcile.
   2. **Classifier (first guard + UX):** `POST /agent/v1/query` runs `classifySql`
      (`packages/core/src/sql.ts`), which parses with the **real PostgreSQL grammar**
      (`pgsql-parser`/libpg_query) and maps each statement's AST to the scope(s) it needs. Missing
@@ -151,11 +159,12 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
      to request it. This drives the approval loop; it can now fail open without being a breach
      because the engine enforces — but it still **fails safe** (unknown/unparsed statement →
      `db:ddl`) so it never under-reports.
-- **Approval loop:** an agent calls `POST /agent/v1/scope-requests` (targeting a resource, or
-  defaulting to its sole project); the request appears as a dashboard notification; the user
-  approves/denies (`/api/scope-requests/:id/approve|deny`). Approval merges the scopes into the
-  agent's grant for that resource (creating the grant + role if it's the first) **and** syncs its
-  Postgres role memberships.
+- **Approval loop:** an agent calls `POST /agent/v1/scope-requests` (targeting a resource — by raw
+  `resourceType`/`resourceId`, or the agent-friendly `projectId`/`branch` *name*, or defaulting to
+  its sole project); the request appears as a dashboard notification; the user approves/denies
+  (`/api/scope-requests/:id/approve|deny`). Approval merges the scopes into the agent's grant for
+  that resource — a **pure metadata write** (no Postgres role touched; the engine picks the matching
+  shared scope-role connection on the agent's next query).
 - **The classifier** is multi-statement and writable-CTE aware and handles the nasty cases —
   `EXPLAIN ANALYZE` (which *executes*), `SELECT … INTO` (a CTAS), `SET ROLE`, `COPY … FROM PROGRAM`,
   `MERGE`, comments, string/dollar-quote literals — by working from the AST, not a token scan.
@@ -163,13 +172,20 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
   Known remaining gaps are covered by the engine, not the classifier: side-effecting functions in
   read position (e.g. a write-performing UDF in a `SELECT`) classify as `db:read` but are refused
   by the role. `db:ddl` ownership of agent-created objects is the rough edge (schema-level `CREATE`
-  + per-agent default privileges; no superuser-only event triggers, so it works on Neon).
+  + per-scope-role default privileges; objects are owned by the shared scope role that created
+  them, so ddl agents on a branch are mutually trusted; no superuser-only event triggers, so it
+  works on Neon).
 
-## Designed-for (not built yet) — keep these in mind
+## Built on this model — and where it extends
 
-- **Branching:** Neon supports instant DB branching; future work branches a whole project
-  (config + optional data) and scopes agents to specific branches. Don't bake "one DB per
-  project forever" assumptions into the provider interface.
-- **Time-boxed / one-shot grants:** scope requests may later be 1h/1d or single-command.
-  `scope_requests` is the natural place to extend.
-- **More resources:** the scope string + provider abstractions are the extension points.
+- **Branching (built):** each branch is its own database — a Neon copy-on-write branch, or a local
+  `CREATE DATABASE … TEMPLATE` clone. Identity (`providerBranchId`/`connectionUri`/`status`) lives
+  on `branches`; a project keeps only its container id. Branch CRUD is `POST/DELETE
+  /api/projects/:id/branches[/:branch]`; the default branch can't be deleted. The `DatabaseProvider`
+  (`provisionProject`/`createBranch`/`destroyBranch`/`destroyProject`) is the extension point — keep
+  it provider-agnostic (local is "flat", Neon is a "container").
+- **Time-boxed grants (built):** `scope_requests.expiresInSeconds` → a per-scope deadline on
+  `agent_grant_scopes`; an expired scope simply drops from the effective set (no revoke step).
+  Single-command/one-shot grants would extend `scope_requests` further.
+- **More resources:** the open scope string + the resource tree (`org`→`project`→`branch`→…) +
+  provider abstractions remain the extension points for future domains (`fn:deploy`, storage, …).
