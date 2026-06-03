@@ -1,11 +1,12 @@
 import { Link } from '@tanstack/react-router'
 import { GitBranch, Plus } from '@walnut/icons'
-import { Badge, Button, Card, EmptyState, Input, Spinner } from '@walnut/ui'
-import { useState, type FormEvent } from 'react'
+import { Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
+import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
-import { useCreateProject, useOrgProjects } from '../../data/queries.ts'
+import { useOrgProjects } from '../../data/queries.ts'
 import { statusTone } from '../../lib/tones.ts'
+import { CreateProjectDialog } from './CreateProjectDialog.tsx'
 
 /** Org home: the projects launchpad. Clicking a project enters its `main` branch. */
 export function ProjectsPage() {
@@ -18,40 +19,26 @@ export function ProjectsPage() {
 
 function ProjectsView({ orgId }: { orgId: string }) {
   const projects = useOrgProjects(orgId)
-  const create = useCreateProject(orgId)
-  const [name, setName] = useState('')
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    const trimmed = name.trim()
-    if (trimmed === '' || create.isPending) {
-      return
-    }
-    create.mutate(trimmed, { onSuccess: () => setName('') })
-  }
-
+  const [createOpen, setCreateOpen] = useState(false)
   const rows = projects.data ?? []
 
   return (
     <PageContainer>
-      <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-      <p className="mt-1 text-sm text-subtle">
-        Open a project to work on its database — each opens on its <span className="font-mono">main</span> branch.
-      </p>
-
-      <form onSubmit={submit} className="mt-5 flex gap-2">
-        <Input
-          value={name}
-          onChange={(event) => setName(event.currentTarget.value)}
-          placeholder="project name, e.g. analytics"
-          className="max-w-xs"
-        />
-        <Button type="submit" disabled={create.isPending}>
+      <div className="flex items-start gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
+          <p className="mt-1 text-sm text-subtle">
+            Open a project to work on its database — each opens on its{' '}
+            <span className="font-mono">main</span> branch.
+          </p>
+        </div>
+        <Button className="ml-auto" onClick={() => setCreateOpen(true)}>
           <Plus size={15} />
-          {create.isPending ? 'Creating…' : 'New project'}
+          New project
         </Button>
-      </form>
-      {create.error !== null ? <p className="mt-2 text-xs text-danger">{create.error.message}</p> : null}
+      </div>
+
+      <CreateProjectDialog orgId={orgId} open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <div className="mt-6">
         {projects.isPending ? (
@@ -59,7 +46,7 @@ function ProjectsView({ orgId }: { orgId: string }) {
         ) : projects.error !== null ? (
           <p className="text-sm text-danger">{projects.error.message}</p>
         ) : rows.length === 0 ? (
-          <EmptyState title="No projects yet" hint="Create your first project above — each one gets its own Postgres database." />
+          <EmptyState title="No projects yet" hint="Create your first project — each one gets its own Postgres database." />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {rows.map((p) => {
