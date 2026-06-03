@@ -59,6 +59,10 @@ export const QUERY_LIMITS = {
   /** Max serialized result size, in bytes — the row cap's companion for wide rows (a
    * handful of large JSON/bytea values can be huge even under the row cap). */
   maxResultBytes: 8 * 1024 * 1024,
+  /** Per-statement execution timeout (ms). Bounds the DB-side work behind a query — the single
+   * source for both the agent scope roles (set at the role level in `roles.ts`) and the dashboard
+   * viewer's owner connection (set per-session in `runSql`), so neither path can run unbounded. */
+  statementTimeoutMs: 15_000,
 } as const
 
 /** A token-bucket budget: up to `capacity` tokens (the largest instantaneous burst),

@@ -1,8 +1,10 @@
 import {
   type AgentScope,
+  byteLength,
   classifySql,
   effectiveScopes,
   missingScopes,
+  QUERY_LIMITS,
   type QueryResult,
   runSql,
   SCOPE_DESCRIPTIONS,
@@ -15,6 +17,19 @@ import { connectionForScopes } from './agents.ts'
 
 export interface AgentQueryResult extends QueryResult {
   requiredScopes: string[]
+}
+
+/** Reject an oversized SQL payload before parsing or running it — bounds memory/bandwidth and
+ * keeps a giant string out of the (comparatively expensive) classifier. Applies to both the
+ * agent and dashboard query paths. */
+function assertSqlWithinLimit(sql: string): void {
+  if (byteLength(sql) > QUERY_LIMITS.maxSqlBytes) {
+    throw new HttpError(413, {
+      error: 'sql_too_large',
+      message: `SQL statement exceeds the ${QUERY_LIMITS.maxSqlBytes}-byte limit.`,
+      maxBytes: QUERY_LIMITS.maxSqlBytes,
+    })
+  }
 }
 
 /**
@@ -36,6 +51,7 @@ export async function runAgentQuery(
   scopeRows: readonly ScopeWithExpiry[],
   sql: string,
 ): Promise<AgentQueryResult> {
+  assertSqlWithinLimit(sql)
   if (branch.status !== 'active' || branch.connectionUri === null) {
     throw new HttpError(409, {
       error: 'branch_not_ready',
@@ -98,6 +114,7 @@ const VIEWER_SCOPES: readonly AgentScope[] = ['db:read']
  * from the browser.
  */
 export async function runReadOnlyQuery(branch: Branch, sql: string, params: unknown[]): Promise<QueryResult> {
+  assertSqlWithinLimit(sql)
   if (branch.status !== 'active' || branch.connectionUri === null) {
     throw new HttpError(409, {
       error: 'branch_not_ready',
@@ -122,8 +139,12 @@ export async function runReadOnlyQuery(branch: Branch, sql: string, params: unkn
   try {
     // readOnly is the engine-level backstop behind the classifier: the connection runs with
     // default_transaction_read_only, so even a side-effecting function the classifier waved
-    // through as db:read (e.g. nextval()) is refused.
-    return await runSql(branch.connectionUri, sql, params, { readOnly: true })
+    // through as db:read (e.g. nextval()) is refused. The viewer runs over the *owner* connection,
+    // which carries no role-level statement_timeout — so set one per-session to bound DB-side work.
+    return await runSql(branch.connectionUri, sql, params, {
+      readOnly: true,
+      statementTimeoutMs: QUERY_LIMITS.statementTimeoutMs,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Query failed'
     throw new HttpError(400, { error: 'query_error', message })

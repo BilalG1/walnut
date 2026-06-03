@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { RESOURCE_LIMITS, runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
+import { QUERY_LIMITS, RESOURCE_LIMITS, runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
 import {
   agents,
   agentGrants,
@@ -1831,5 +1831,51 @@ describe('resource limits', () => {
     const body = res.error?.value as ErrorBody | undefined
     expect(body?.error).toBe('limit_exceeded')
     expect(body?.limit).toBe('pending_scope_requests_per_agent')
+  })
+})
+
+describe('query limits', () => {
+  test('rejects an oversized SQL payload with 413 sql_too_large', async () => {
+    await newProject()
+    const agent = await newAgent()
+    // The size check runs before classify/scope, so even a grant-less agent gets 413 (not 403).
+    const huge = `-- ${'x'.repeat(QUERY_LIMITS.maxSqlBytes + 1)}\nSELECT 1`
+    const res = await h.api.agent.v1.query.post({ sql: huge }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(413)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('sql_too_large')
+  })
+
+  test('truncates a result set past the row cap and flags it', async () => {
+    const project = await newProject()
+    const overBy = 5_000
+    const total = QUERY_LIMITS.maxResultRows + overBy
+    const res = await h.api.api
+      .projects({ id: project.id })
+      .sql.post({ sql: `SELECT g AS n FROM generate_series(1, ${total}) AS g` })
+    expect(res.status).toBe(200)
+    expect(res.data?.rows.length).toBe(QUERY_LIMITS.maxResultRows)
+    expect(res.data?.rowCount).toBe(total) // the true count is preserved
+    expect(res.data?.truncated).toBe(true)
+  })
+
+  test('truncates a wide result set past the byte cap and flags it', async () => {
+    const project = await newProject()
+    // 100 rows × ~200 KB each ≈ 20 MB, well over the byte ceiling — only a row prefix survives,
+    // even though the row count (100) is far under the row cap.
+    const res = await h.api.api
+      .projects({ id: project.id })
+      .sql.post({ sql: `SELECT repeat('x', 200000) AS big FROM generate_series(1, 100) AS g` })
+    expect(res.status).toBe(200)
+    expect(res.data?.truncated).toBe(true)
+    expect(res.data?.rows.length).toBeLessThan(100)
+    expect(res.data?.rowCount).toBe(100)
+  }, 15_000)
+
+  test('a normal small query is not flagged as truncated', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT 1 AS n' })
+    expect(res.status).toBe(200)
+    expect(res.data?.truncated).toBe(false)
+    expect(res.data?.rows).toEqual([{ n: 1 }])
   })
 })

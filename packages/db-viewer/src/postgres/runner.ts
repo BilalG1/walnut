@@ -10,6 +10,10 @@ export interface RawResult {
   rows: Record<string, unknown>[]
   /** Column names in result order. */
   fields: string[]
+  /** True when the runner dropped trailing rows to fit a size cap (the host's `/sql` route caps
+   * result size). When set, a page's over-fetch probe can't be trusted to report `hasNext` —
+   * there is definitely more data — so the adapter forces `hasNext`. */
+  truncated?: boolean
 }
 
 export interface SqlRunner {

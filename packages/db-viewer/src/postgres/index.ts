@@ -88,7 +88,11 @@ export function createPostgresAdapter(options: PostgresAdapterOptions): Database
 
       const built = buildRowsQuery(input)
       const result = await run(built.sql, built.params, { signal: request.signal })
-      const { rows: pageRows, hasNext } = trimProbe(result.rows, limit)
+      const probe = trimProbe(result.rows, limit)
+      // A size-capped result can drop the over-fetch probe row (and more), which would make the
+      // probe under-report `hasNext`. A truncated result always means there's more to show.
+      const hasNext = probe.hasNext || result.truncated === true
+      const pageRows = probe.rows
       const cellRows = pageRows.map((row) => built.selected.map((c) => toCellValue(c, row[c.name])))
 
       const total = await maybeCount(input, request, run)

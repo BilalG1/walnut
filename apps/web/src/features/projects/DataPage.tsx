@@ -34,7 +34,7 @@ function DataView({ projectId, branch }: { projectId: string; branch: string }) 
               .branches({ branch })
               .sql.post({ sql, params: scalars }, { fetch: { signal: opts?.signal } }),
           )
-          return { rows: result.rows, fields: result.fields }
+          return { rows: result.rows, fields: result.fields, truncated: result.truncated }
         },
       }),
     [projectId, branch],

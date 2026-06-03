@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import postgres from 'postgres'
+import { QUERY_LIMITS } from './limits.ts'
 import { type AgentScope, DB_SCOPES, type DbScope, scopeMask } from './scopes.ts'
 
 /**
@@ -180,7 +181,7 @@ export async function ensureScopeRole(ownerUri: string, scopes: readonly AgentSc
     // Self-heal a pre-existing role: match its password to the connection we hand back.
     `ALTER ROLE ${ident(role)} WITH LOGIN PASSWORD '${password}';`,
     `GRANT CONNECT ON DATABASE ${ident(prefix)} TO ${ident(role)};`,
-    `ALTER ROLE ${ident(role)} SET statement_timeout = '15s';`,
+    `ALTER ROLE ${ident(role)} SET statement_timeout = ${QUERY_LIMITS.statementTimeoutMs};`,
     // `ALTER DEFAULT PRIVILEGES FOR ROLE <role>` requires the executor to hold the SET option
     // on that role. A superuser owner (local) has it implicitly, but a non-superuser owner
     // (Neon) does not — so grant it explicitly first, or provisioning 500s in production.
