@@ -111,6 +111,8 @@ export interface CliHarness {
   makeAgent: (opts?: MakeAgentOptions) => Promise<{ projectId: string; key: string }>
   /** Create an extra project in the seeded user's org (no agent) — for org-scoping tests. */
   makeProject: (name: string) => Promise<{ id: string }>
+  /** Create a branch of a project (clone of its default) — for branch-targeting tests. */
+  makeBranch: (projectId: string, name: string) => Promise<{ id: string; name: string }>
   /** Request + approve scopes for an agent. Targets `projectId` when given, else the
    * agent's default (sole) project. */
   grant: (key: string, scopes: string[], projectId?: string) => Promise<void>
@@ -179,6 +181,15 @@ export async function createCliHarness(): Promise<CliHarness> {
     return projData
   }
 
+  async function makeBranch(projectId: string, name: string): Promise<{ id: string; name: string }> {
+    const res = await api.api.projects({ id: projectId }).branches.post({ name })
+    const data = res.data as { id: string; name: string } | null
+    if (data === null) {
+      throw new Error(`createBranch failed: ${JSON.stringify(res.error?.value)}`)
+    }
+    return data
+  }
+
   async function systemOrgId(): Promise<string> {
     const res = await api.api.organizations.get()
     const org = (res.data as { id: string; isPersonal: boolean }[] | null)?.find((o) => o.isPersonal)
@@ -245,5 +256,5 @@ export async function createCliHarness(): Promise<CliHarness> {
     await rm(homeDir, { recursive: true, force: true })
   }
 
-  return { ctx, homeDir, makeAgent, makeProject, grant, run: runCli, spawn, reset, dispose }
+  return { ctx, homeDir, makeAgent, makeProject, makeBranch, grant, run: runCli, spawn, reset, dispose }
 }

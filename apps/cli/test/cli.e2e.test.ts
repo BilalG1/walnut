@@ -102,6 +102,41 @@ describe('project ls', () => {
   })
 })
 
+describe('branch ls', () => {
+  test('lists the project branches (id + name + default)', async () => {
+    const { projectId, key } = await h.makeAgent({ projectName: 'br-proj' })
+    await h.makeBranch(projectId, 'feature')
+    const r = await h.run(['branch', 'ls'], { key })
+    expect(r.code).toBe(0)
+    const out = parse(r.stdout) as { id: string; name: string; isDefault: boolean }[]
+    expect(out.map((b) => b.name).toSorted()).toEqual(['feature', 'main'])
+    expect(out.find((b) => b.name === 'main')?.isDefault).toBe(true)
+    expect(out.find((b) => b.name === 'feature')?.isDefault).toBe(false)
+    // Deliberately minimal shape: id + name + isDefault.
+    expect(Object.keys(out[0] ?? {}).toSorted()).toEqual(['id', 'isDefault', 'name'])
+  }, 20_000)
+
+  test('unknown subcommand → exit 2', async () => {
+    const { key } = await h.makeAgent()
+    const r = await h.run(['branch', 'nope'], { key })
+    expect(r.code).toBe(2)
+  })
+
+  test('--project targets an explicit project when the agent can reach several', async () => {
+    const { projectId, key } = await h.makeAgent({ scopes: ['db:read'] })
+    const other = await h.makeProject('br-second')
+    await h.grant(key, ['db:read'], other.id)
+    // Two reachable projects → an untargeted branch ls is ambiguous.
+    const amb = await h.run(['branch', 'ls'], { key })
+    expect(amb.code).toBe(5)
+    expect(parse(amb.stderr).error).toBe('ambiguous_project')
+    // --project disambiguates.
+    const r = await h.run(['branch', 'ls', '--project', projectId], { key })
+    expect(r.code).toBe(0)
+    expect((parse(r.stdout) as { name: string }[]).map((b) => b.name)).toEqual(['main'])
+  }, 20_000)
+})
+
 describe('db query', () => {
   test('a granted read returns rows, exit 0', async () => {
     const { key } = await h.makeAgent({ scopes: ['db:read'] })
@@ -197,6 +232,24 @@ describe('scope', () => {
     expect(out.status).toBe('pending')
     expect(out.resourceType).toBe('project')
     expect(out.resourceId).toBe(projectId)
+  })
+
+  test('scope request --branch targets that branch of the project', async () => {
+    const { projectId, key } = await h.makeAgent()
+    const feature = await h.makeBranch(projectId, 'feature')
+    const r = await h.run(['scope', 'request', 'db:write', '--branch', 'feature'], { key })
+    expect(r.code).toBe(0)
+    const out = parse(r.stdout)
+    expect(out.status).toBe('pending')
+    expect(out.resourceType).toBe('branch')
+    expect(out.resourceId).toBe(feature.id)
+  }, 20_000)
+
+  test('scope request --branch on a nonexistent branch → exit 5', async () => {
+    const { key } = await h.makeAgent()
+    const r = await h.run(['scope', 'request', 'db:read', '--branch', 'ghost'], { key })
+    expect(r.code).toBe(5)
+    expect(parse(r.stderr).error).toBe('branch_not_found')
   })
 
   test('scope request --ttl time-boxes the request', async () => {

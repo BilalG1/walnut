@@ -1,9 +1,9 @@
 import { parseArgs } from './args.ts'
 import { type ApiClient, makeClient } from './client.ts'
-import { dbQuery, login, logout, projectLs, scopeLs, scopeRequest, whoami } from './commands.ts'
+import { branchLs, dbQuery, login, logout, projectLs, scopeLs, scopeRequest, whoami } from './commands.ts'
 import { resolveConfig } from './config.ts'
 import { EXIT } from './exit.ts'
-import { authHelp, dbHelp, projectHelp, scopeHelp, topLevelHelp } from './help.ts'
+import { authHelp, branchHelp, dbHelp, projectHelp, scopeHelp, topLevelHelp } from './help.ts'
 import { fail, type CliResult } from './output.ts'
 import { VERSION } from './version.ts'
 
@@ -122,6 +122,17 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
       return withClient(io, parsed.options, pretty, (client) => projectLs(client, pretty))
     }
 
+    case 'branch': {
+      if (wantsHelp) return help(branchHelp())
+      if (sub === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'branch needs a subcommand. Try: walnut branch ls.', pretty)
+      }
+      if (sub !== 'ls') {
+        return fail(EXIT.USAGE, 'usage', `Unknown branch subcommand: ${sub}. Only "ls" is supported.`, pretty)
+      }
+      return withClient(io, parsed.options, pretty, (client) => branchLs(client, flag(parsed.options, 'project'), pretty))
+    }
+
     case 'scope': {
       if (wantsHelp) return help(scopeHelp())
       if (sub === undefined) {
@@ -136,6 +147,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
         }
         const reason = flag(parsed.options, 'reason')
         const projectId = flag(parsed.options, 'project')
+        const branch = flag(parsed.options, 'branch')
         const ttlRaw = flag(parsed.options, 'ttl')
         let expiresInSeconds: number | undefined
         if (ttlRaw !== undefined) {
@@ -146,7 +158,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
           expiresInSeconds = parsedTtl
         }
         return withClient(io, parsed.options, pretty, (client) =>
-          scopeRequest(client, rest, reason, projectId, expiresInSeconds, pretty),
+          scopeRequest(client, rest, reason, projectId, branch, expiresInSeconds, pretty),
         )
       }
       return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)

@@ -116,14 +116,20 @@ export async function resolveBranch(ctx: AppContext, projectId: string, name?: s
   return row
 }
 
-/** A project's branches (caller must be a member of its org). Default branch first. */
-export async function listBranches(ctx: AppContext, projectId: string, userId: string): Promise<Branch[]> {
-  await getProject(ctx, projectId, userId)
+/** A project's branches, default first. No ownership check — for agent callers already bound
+ * to the org (they resolve a project they're scoped to). */
+export async function listBranchesInternal(ctx: AppContext, projectId: string): Promise<Branch[]> {
   return ctx.db
     .select()
     .from(branches)
     .where(eq(branches.projectId, projectId))
     .orderBy(desc(branches.isDefault), branches.name)
+}
+
+/** A project's branches (caller must be a member of its org). Default branch first. */
+export async function listBranches(ctx: AppContext, projectId: string, userId: string): Promise<Branch[]> {
+  await getProject(ctx, projectId, userId)
+  return listBranchesInternal(ctx, projectId)
 }
 
 /** Fetch a project by id with no ownership check (internal/agent callers only). */

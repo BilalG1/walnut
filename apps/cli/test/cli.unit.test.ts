@@ -102,6 +102,10 @@ describe('run — help and version (no network)', () => {
     expect((await run(['db', '--help'], io())).stdout).toContain('walnut db query')
     expect((await run(['scope', '-h'], io())).stdout).toContain('walnut scope request')
   })
+
+  test('branch --help prints to stdout', async () => {
+    expect((await run(['branch', '--help'], io())).stdout).toContain('walnut branch ls')
+  })
 })
 
 describe('run — usage errors (no network)', () => {
@@ -125,6 +129,11 @@ describe('run — usage errors (no network)', () => {
 
   test('db with no subcommand → exit 2', async () => {
     expect((await run(['db'], io())).code).toBe(EXIT.USAGE)
+  })
+
+  test('branch with no subcommand → exit 2; unknown subcommand → exit 2', async () => {
+    expect((await run(['branch'], io())).code).toBe(EXIT.USAGE)
+    expect((await run(['branch', 'nope'], io())).code).toBe(EXIT.USAGE)
   })
 
   test('scope request with no scopes → exit 2', async () => {

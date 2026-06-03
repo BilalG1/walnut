@@ -5,7 +5,7 @@ import { HttpError, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
 import { agentScopesForBranch, findAgentByKey, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
-import { listProjectsInOrg, resolveBranch } from '../services/projects.ts'
+import { listBranchesInternal, listProjectsInOrg, resolveBranch } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
 
@@ -41,6 +41,17 @@ export function agentApiRoutes(ctx: AppContext) {
       const rows = await listProjectsInOrg(ctx, agent.organizationId)
       return rows.map((p) => ({ id: p.id, name: p.name }))
     })
+    // The branches of a target project (explicit `projectId`, or the agent's sole project), so
+    // an agent can discover names for `--branch` (on db query / scope request). id + name + default.
+    .get(
+      '/branches',
+      async ({ agent, query }) => {
+        const project = await resolveAgentProject(ctx, agent, query.projectId)
+        const rows = await listBranchesInternal(ctx, project.id)
+        return rows.map((b) => ({ id: b.id, name: b.name, isDefault: b.isDefault }))
+      },
+      { query: t.Object({ projectId: t.Optional(t.String()) }) },
+    )
     .post(
       '/query',
       async ({ agent, body }) => {
@@ -96,12 +107,29 @@ export function agentApiRoutes(ctx: AppContext) {
     .post(
       '/scope-requests',
       async ({ agent, body }) => {
+        // Resolve the target. Explicit resourceType+resourceId wins (the raw form). Otherwise the
+        // agent-friendly form: `branch` (a name) targets that branch of the project (explicit
+        // `projectId` or the sole one); `projectId` alone targets the project; nothing → the
+        // server's default (sole project, in createScopeRequest).
+        let resourceType = body.resourceType
+        let resourceId = body.resourceId
+        if (resourceType === undefined || resourceId === undefined) {
+          if (body.branch !== undefined) {
+            const project = await resolveAgentProject(ctx, agent, body.projectId)
+            const branch = await resolveBranch(ctx, project.id, body.branch)
+            resourceType = 'branch'
+            resourceId = branch.id
+          } else if (body.projectId !== undefined) {
+            resourceType = 'project'
+            resourceId = (await resolveAgentProject(ctx, agent, body.projectId)).id
+          }
+        }
         const created = await createScopeRequest(ctx, agent, {
           scopes: body.scopes,
           reason: body.reason,
           expiresInSeconds: body.expiresInSeconds,
-          resourceType: body.resourceType,
-          resourceId: body.resourceId,
+          resourceType,
+          resourceId,
         })
         return toScopeRequestView(created)
       },
@@ -111,6 +139,10 @@ export function agentApiRoutes(ctx: AppContext) {
           reason: t.Optional(t.String({ maxLength: 500 })),
           /** Optional time-box (seconds) for the requested scopes; omit for permanent. */
           expiresInSeconds: t.Optional(t.Integer({ minimum: 1 })),
+          /** Agent-friendly target: a project id and/or a branch *name*. */
+          projectId: t.Optional(t.String()),
+          branch: t.Optional(t.String()),
+          /** Raw target (used by the dashboard); takes precedence when both are set. */
           resourceType: t.Optional(t.Union([t.Literal('org'), t.Literal('project'), t.Literal('branch')])),
           resourceId: t.Optional(t.String()),
         }),

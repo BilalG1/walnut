@@ -47,6 +47,19 @@ export async function projectLs(client: ApiClient, pretty: boolean): Promise<Cli
   }
 }
 
+/** `branch ls` → GET /agent/v1/branches (the target project's branches: id + name + default).
+ * `--project` picks the project; omit it for the agent's sole project. */
+export async function branchLs(client: ApiClient, projectId: string | undefined, pretty: boolean): Promise<CliResult> {
+  try {
+    const res = await client.agent.v1.branches.get({
+      query: projectId === undefined ? {} : { projectId },
+    })
+    return respond(res, pretty)
+  } catch (err) {
+    return networkError(err, pretty)
+  }
+}
+
 /** `db query <sql>` → POST /agent/v1/query, against the chosen project + branch. Only sends
  * the target fields the user actually set, so the server applies its own defaults. */
 export async function dbQuery(client: ApiClient, sql: string, target: Target, pretty: boolean): Promise<CliResult> {
@@ -83,14 +96,16 @@ export async function scopeLs(client: ApiClient, pretty: boolean): Promise<CliRe
   }
 }
 
-/** `scope request <scope...>` → POST /agent/v1/scope-requests. With `--project` the request
- * targets that project; without it the server defaults to the agent's sole project. With
- * `--ttl` the scopes are time-boxed to that many seconds once approved (else permanent). */
+/** `scope request <scope...>` → POST /agent/v1/scope-requests. `--project` targets that project
+ * and `--branch <name>` targets that branch of it (a branch-scoped grant); omit both and the
+ * server defaults to the agent's sole project. With `--ttl` the scopes are time-boxed to that
+ * many seconds once approved (else permanent). */
 export async function scopeRequest(
   client: ApiClient,
   scopes: string[],
   reason: string | undefined,
   projectId: string | undefined,
+  branch: string | undefined,
   expiresInSeconds: number | undefined,
   pretty: boolean,
 ): Promise<CliResult> {
@@ -99,7 +114,8 @@ export async function scopeRequest(
       scopes,
       ...(reason === undefined ? {} : { reason }),
       ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
-      ...(projectId === undefined ? {} : { resourceType: 'project' as const, resourceId: projectId }),
+      ...(projectId === undefined ? {} : { projectId }),
+      ...(branch === undefined ? {} : { branch }),
     }
     const res = await client.agent.v1['scope-requests'].post(body)
     return respond(res, pretty)

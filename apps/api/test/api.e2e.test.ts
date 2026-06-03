@@ -638,6 +638,31 @@ describe('scope requests', () => {
   })
 })
 
+describe('agent branch API', () => {
+  test('GET /agent/v1/branches lists the target project branches', async () => {
+    const project = await newProject('agent-branches')
+    await h.api.api.projects({ id: project.id }).branches.post({ name: 'feature' })
+    const agent = await newAgent('br-agent')
+    const res = await h.api.agent.v1.branches.get({ headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(200)
+    expect((res.data ?? []).map((b) => b.name).toSorted()).toEqual(['feature', 'main'])
+    expect(res.data?.find((b) => b.name === 'main')?.isDefault).toBe(true)
+  }, 20_000)
+
+  test('scope request with a branch name targets that branch (agent-friendly form)', async () => {
+    const project = await newProject('agent-branch-req')
+    const br = await h.api.api.projects({ id: project.id }).branches.post({ name: 'feature' })
+    const agent = await newAgent('br-req-agent')
+    const res = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:write'], branch: 'feature' },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(200)
+    expect(res.data?.resourceType).toBe('branch')
+    expect(res.data?.resourceId).toBe(br.data?.id)
+  }, 20_000)
+})
+
 describe('org-scoped agents', () => {
   test('identity reports the agent\'s organization and no project until granted', async () => {
     const agent = await newAgent('org-bot')
