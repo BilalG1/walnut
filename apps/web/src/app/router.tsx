@@ -6,6 +6,7 @@ import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
 import { AgentDetailPage } from '../features/orgs/AgentDetailPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { GetStartedPage } from '../features/orgs/GetStartedPage.tsx'
+import { MembersPage } from '../features/orgs/MembersPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
 import { ActivityPage } from '../features/projects/ActivityPage.tsx'
@@ -53,11 +54,7 @@ const orgAgentDetailRoute = createRoute({
   component: AgentDetailPage,
 })
 const orgRequestsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'requests', component: RequestsPage })
-const orgMembersRoute = createRoute({
-  getParentRoute: () => orgRoute,
-  path: 'members',
-  component: () => <PlaceholderPage title="Members" />,
-})
+const orgMembersRoute = createRoute({ getParentRoute: () => orgRoute, path: 'members', component: MembersPage })
 const orgSettingsRoute = createRoute({
   getParentRoute: () => orgRoute,
   path: 'settings',
