@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { SYSTEM_USER_ID } from '@walnut/core'
+import { runSql, SYSTEM_USER_ID } from '@walnut/core'
 import { agentGrants, agentGrantScopes, branches, organizationMembers, organizations } from '@walnut/db'
 import { and, eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
@@ -883,6 +883,101 @@ describe('dev login bypass', () => {
       }),
     )
     expect(res.status).toBe(404)
+  })
+})
+
+describe('dashboard data viewer (POST /api/projects/:id/sql)', () => {
+  test('runs a parameterized read-only query', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT $1::int AS n', params: [42] })
+    expect(res.status).toBe(200)
+    expect(res.data?.rows).toEqual([{ n: 42 }])
+    expect(res.data?.fields).toEqual(['n'])
+  })
+
+  test('reads multiple rows from a values list (no table needed)', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({
+      sql: "SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v(id, label) ORDER BY id LIMIT $1",
+      params: [10],
+    })
+    expect(res.status).toBe(200)
+    expect(res.data?.rows).toEqual([
+      { id: 1, label: 'a' },
+      { id: 2, label: 'b' },
+    ])
+    expect(res.data?.fields).toEqual(['id', 'label'])
+  })
+
+  test('rejects a write with 403 read_only', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'INSERT INTO t (x) VALUES (1)' })
+    expect(res.status).toBe(403)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('read_only')
+  })
+
+  test('rejects DDL with 403 read_only', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'CREATE TABLE t (id int)' })
+    expect(res.status).toBe(403)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('read_only')
+  })
+
+  test('a read-query SQL error surfaces as 400 query_error', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT * FROM no_such_table' })
+    expect(res.status).toBe(400)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('query_error')
+  })
+
+  test('rejects an empty statement', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: '   ' })
+    expect(res.status).toBe(400)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('empty_query')
+  })
+
+  test("another user cannot query someone else's project (404)", async () => {
+    const project = await newProject()
+    const other = await h.clientFor('00000000-0000-0000-0000-0000000000ab', { email: 'other@walnut.cloud' })
+    const res = await other.api.projects({ id: project.id }).sql.post({ sql: 'SELECT 1 AS n' })
+    expect(res.status).toBe(404)
+  })
+
+  test('rejects a multi-statement batch that smuggles a write', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT 1; DROP TABLE foo' })
+    expect(res.status).toBe(403)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('read_only')
+  })
+
+  test('rejects a delete with 403 read_only', async () => {
+    const project = await newProject()
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'DELETE FROM whatever' })
+    expect(res.status).toBe(403)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('read_only')
+  })
+
+  test('the read-only session is the engine backstop: a write is refused even without the classifier', async () => {
+    // The classifier 403s known writes before execution, so to prove the *engine* layer we call
+    // runSql directly (as the route does) with readOnly. A write the classifier would otherwise
+    // have to catch — here a CREATE — is refused by Postgres itself. This is what guards a
+    // classifier blind spot (e.g. a write-performing function in read position).
+    const project = await newProject()
+    const detail = await h.api.api.projects({ id: project.id }).get()
+    const uri = detail.data?.connectionUri
+    if (typeof uri !== 'string') {
+      throw new Error('project has no connection uri')
+    }
+    const read = await runSql(uri, 'SELECT 1 AS n', [], { readOnly: true })
+    expect(read.rows).toEqual([{ n: 1 }])
+    // A write is rejected by the read-only transaction (temp table → no persistence/teardown).
+    await expect(runSql(uri, 'CREATE TEMP TABLE _ro_probe (i int)', [], { readOnly: true })).rejects.toThrow(
+      'read-only',
+    )
+    // Sanity: without readOnly the same statement is allowed.
+    const ok = await runSql(uri, 'CREATE TEMP TABLE _rw_probe (i int)', [])
+    expect(ok.command).toBe('CREATE TABLE')
   })
 })
 

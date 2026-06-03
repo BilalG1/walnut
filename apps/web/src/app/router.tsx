@@ -9,6 +9,7 @@ import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
 import { ActivityPage } from '../features/projects/ActivityPage.tsx'
 import { DatabasePage } from '../features/projects/DatabasePage.tsx'
+import { DataPage } from '../features/projects/DataPage.tsx'
 import { OverviewPage } from '../features/projects/OverviewPage.tsx'
 import { ProjectSettingsPage } from '../features/projects/SettingsPage.tsx'
 import { queryClient } from './queryClient.ts'
@@ -59,7 +60,15 @@ const orgSettingsRoute = createRoute({
 // Project / branch scope ----------------------------------------------------
 const projectRoute = createRoute({ getParentRoute: () => orgRoute, path: 'projects/$projectId/branches/$branch' })
 const projectIndexRoute = createRoute({ getParentRoute: () => projectRoute, path: '/', component: OverviewPage })
-const projectDatabaseRoute = createRoute({ getParentRoute: () => projectRoute, path: 'database', component: DatabasePage })
+// "Database" is a section with two subtabs: the data viewer (default/index) and the connection
+// details. The parent route has no component, so it renders its active child via <Outlet/>.
+const projectDatabaseRoute = createRoute({ getParentRoute: () => projectRoute, path: 'database' })
+const projectDatabaseDataRoute = createRoute({ getParentRoute: () => projectDatabaseRoute, path: '/', component: DataPage })
+const projectDatabaseConnectionRoute = createRoute({
+  getParentRoute: () => projectDatabaseRoute,
+  path: 'connection',
+  component: DatabasePage,
+})
 const projectActivityRoute = createRoute({ getParentRoute: () => projectRoute, path: 'activity', component: ActivityPage })
 const projectSettingsRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -76,7 +85,12 @@ const routeTree = rootRoute.addChildren([
     orgRequestsRoute,
     orgMembersRoute,
     orgSettingsRoute,
-    projectRoute.addChildren([projectIndexRoute, projectDatabaseRoute, projectActivityRoute, projectSettingsRoute]),
+    projectRoute.addChildren([
+      projectIndexRoute,
+      projectDatabaseRoute.addChildren([projectDatabaseDataRoute, projectDatabaseConnectionRoute]),
+      projectActivityRoute,
+      projectSettingsRoute,
+    ]),
   ]),
 ])
 

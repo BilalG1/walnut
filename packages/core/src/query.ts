@@ -21,8 +21,28 @@ interface PgResultMeta {
  * Run a raw SQL string against a provisioned database over a short-lived
  * connection. Scope enforcement happens *before* this is ever called — this
  * function assumes the statement has already been authorised.
+ *
+ * `params` binds positional placeholders (`$1`, `$2`, …). When omitted, the
+ * statement runs over the simple query protocol, which (unlike the parameterized
+ * path) permits multiple statements — the agent query path relies on that, so
+ * the no-param call is preserved exactly.
+ *
+ * `options.readOnly` makes the session read-only (`SET SESSION CHARACTERISTICS AS TRANSACTION
+ * READ ONLY`) before running the statement, so the engine itself rejects any write — INSERT/
+ * UPDATE/DDL and side-effecting functions in read position (e.g. `nextval()`) alike. The
+ * dashboard data viewer uses this so a classifier blind spot can't mutate even over the owner
+ * connection. (`max: 1` guarantees the SET and the query share one connection.)
  */
-export async function runSql(connectionUri: string, sql: string): Promise<QueryResult> {
+export interface RunSqlOptions {
+  readOnly?: boolean
+}
+
+export async function runSql(
+  connectionUri: string,
+  sql: string,
+  params: unknown[] = [],
+  options: RunSqlOptions = {},
+): Promise<QueryResult> {
   const client = postgres(connectionUri, {
     max: 1,
     prepare: false,
@@ -30,7 +50,10 @@ export async function runSql(connectionUri: string, sql: string): Promise<QueryR
     connect_timeout: 15,
   })
   try {
-    const result = await client.unsafe(sql)
+    if (options.readOnly === true) {
+      await client.unsafe('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY')
+    }
+    const result = params.length > 0 ? await client.unsafe(sql, params as never[]) : await client.unsafe(sql)
     const rows = [...(result as unknown as Record<string, unknown>[])]
     const meta = result as unknown as PgResultMeta
     return {

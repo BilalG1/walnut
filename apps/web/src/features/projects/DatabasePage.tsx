@@ -30,7 +30,7 @@ function DatabaseView({ projectId }: { projectId: string }) {
 
   return (
     <PageContainer>
-      <h1 className="text-2xl font-semibold tracking-tight">Database</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Connection</h1>
       <p className="mt-1 text-sm text-subtle">The owner connection for this branch's Postgres database.</p>
 
       <div className="mt-6">

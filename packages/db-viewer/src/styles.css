@@ -1,0 +1,394 @@
+/*
+ * Default theme + layout for @walnut/db-viewer.
+ *
+ * Every class is `wdv-`-prefixed (so it won't collide with host styles) and the theme tokens
+ * live on `.wdv-root`; the components always render inside `.wdv-root`, so the `--wdv-*` variables
+ * resolve. The ~13 variables are the whole theming surface:
+ *   1. The viewer looks right standalone (these are sensible light/dark defaults).
+ *   2. A host themes it by remapping the variables to its own tokens in one place, e.g.
+ *        .wdv-root { --wdv-surface: var(--color-surface); --wdv-fg: var(--color-fg); … }
+ *      and it inherits the host's `.dark` flip automatically.
+ *
+ * No Tailwind, no external dependency — plain CSS the consumer imports once.
+ */
+
+.wdv-root {
+  --wdv-canvas: #f6f6f7;
+  --wdv-surface: #ffffff;
+  --wdv-sunken: #f1f1f3;
+  --wdv-hover: #ececef;
+  --wdv-line: #e4e4e7;
+  --wdv-line-strong: #d4d4d8;
+  --wdv-fg: #1c1c1f;
+  --wdv-fg-secondary: #3f3f46;
+  --wdv-muted: #57575f;
+  --wdv-subtle: #71717a;
+  --wdv-faint: #a1a1aa;
+  --wdv-accent: #8a6443;
+  --wdv-danger: #dc2626;
+  --wdv-radius: 8px;
+
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--wdv-line);
+  border-radius: var(--wdv-radius);
+  background: var(--wdv-surface);
+  color: var(--wdv-fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+}
+
+.dark .wdv-root {
+  --wdv-canvas: #0a0a0b;
+  --wdv-surface: #171717;
+  --wdv-sunken: #0a0a0a;
+  --wdv-hover: #262626;
+  --wdv-line: #262626;
+  --wdv-line-strong: #404040;
+  --wdv-fg: #e7e7ea;
+  --wdv-fg-secondary: #d4d4d4;
+  --wdv-muted: #a3a3a3;
+  --wdv-subtle: #737373;
+  --wdv-faint: #525252;
+  --wdv-accent: #c9a98a;
+  --wdv-danger: #f87171;
+}
+
+/* --- Sidebar / table list --- */
+.wdv-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--wdv-line);
+  background: var(--wdv-canvas);
+}
+
+.wdv-filter {
+  margin: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--wdv-line-strong);
+  border-radius: 6px;
+  background: var(--wdv-sunken);
+  color: var(--wdv-fg);
+  font-size: 12px;
+  outline: none;
+}
+.wdv-filter:focus {
+  border-color: var(--wdv-accent);
+}
+.wdv-filter::placeholder {
+  color: var(--wdv-faint);
+}
+
+.wdv-table-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+.wdv-table-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wdv-table-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wdv-fg-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.wdv-table-item:hover {
+  background: var(--wdv-hover);
+}
+.wdv-table-item-active {
+  background: color-mix(in srgb, var(--wdv-accent) 14%, transparent);
+  color: var(--wdv-accent);
+  font-weight: 600;
+}
+.wdv-table-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wdv-table-item-count {
+  flex-shrink: 0;
+  color: var(--wdv-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Main panel --- */
+.wdv-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wdv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wdv-line);
+}
+.wdv-toolbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.wdv-table-name {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wdv-table-est {
+  color: var(--wdv-subtle);
+  font-size: 11px;
+}
+.wdv-toolbar-spinner {
+  width: 13px;
+  height: 13px;
+  align-self: center;
+}
+.wdv-refresh {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--wdv-line-strong);
+  border-radius: 6px;
+  background: var(--wdv-surface);
+  color: var(--wdv-fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wdv-refresh:hover {
+  background: var(--wdv-hover);
+}
+
+/* --- Grid --- */
+.wdv-grid {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.wdv-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+}
+.wdv-header-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.wdv-th {
+  position: sticky;
+  top: 0;
+  /* Above body cells on horizontal scroll. Browsers that ignore sticky on <tr> fall back to the
+     per-th stickiness, so the z-index must live here, not only on the row. */
+  z-index: 1;
+  padding: 0;
+  border-bottom: 1px solid var(--wdv-line-strong);
+  background: var(--wdv-canvas);
+  text-align: left;
+  white-space: nowrap;
+}
+.wdv-th-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: var(--wdv-fg-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wdv-th-button:hover {
+  background: var(--wdv-hover);
+}
+.wdv-th-pk {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--wdv-accent);
+  border: 1px solid color-mix(in srgb, var(--wdv-accent) 40%, transparent);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+.wdv-th-indicator {
+  margin-left: auto;
+  color: var(--wdv-accent);
+  width: 8px;
+}
+
+.wdv-row:nth-child(even) {
+  background: color-mix(in srgb, var(--wdv-sunken) 50%, transparent);
+}
+.wdv-row:hover {
+  background: var(--wdv-hover);
+}
+.wdv-td {
+  max-width: 360px;
+  padding: 0;
+  border-bottom: 1px solid var(--wdv-line);
+  vertical-align: top;
+}
+
+.wdv-cell {
+  display: block;
+  padding: 6px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.wdv-null {
+  color: var(--wdv-faint);
+  font-style: italic;
+}
+.wdv-cell-bigint,
+.wdv-cell-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wdv-cell-uuid,
+.wdv-cell-bytea,
+.wdv-cell-json,
+.wdv-cell-timestamp,
+.wdv-cell-date {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.wdv-cell-expandable {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+.wdv-cell-truncated {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wdv-cell-full {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.wdv-grid-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+/* --- States --- */
+.wdv-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--wdv-line-strong);
+  border-top-color: var(--wdv-accent);
+  border-radius: 50%;
+  animation: wdv-spin 0.7s linear infinite;
+}
+@keyframes wdv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wdv-spinner {
+    animation: none;
+  }
+}
+.wdv-empty {
+  text-align: center;
+  color: var(--wdv-subtle);
+}
+.wdv-empty-title {
+  margin: 0;
+  font-weight: 500;
+  color: var(--wdv-fg-secondary);
+}
+.wdv-empty-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--wdv-subtle);
+}
+.wdv-error {
+  margin: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--wdv-danger) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wdv-danger) 8%, transparent);
+  color: var(--wdv-danger);
+  font-size: 12px;
+}
+
+/* --- Pagination --- */
+.wdv-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--wdv-line);
+}
+.wdv-range {
+  color: var(--wdv-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.wdv-pager {
+  display: flex;
+  gap: 6px;
+}
+.wdv-pager-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--wdv-line-strong);
+  border-radius: 6px;
+  background: var(--wdv-surface);
+  color: var(--wdv-fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wdv-pager-btn:hover:not(:disabled) {
+  background: var(--wdv-hover);
+}
+.wdv-pager-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

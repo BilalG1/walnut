@@ -54,6 +54,7 @@
         "@tanstack/react-router": "^1.95.0",
         "@walnut/api": "workspace:*",
         "@walnut/core": "workspace:*",
+        "@walnut/db-viewer": "workspace:*",
         "@walnut/icons": "workspace:*",
         "@walnut/ui": "workspace:*",
         "react": "19.2.6",
@@ -91,6 +92,25 @@
         "drizzle-kit": "0.31.10",
       },
     },
+    "packages/db-viewer": {
+      "name": "@walnut/db-viewer",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@happy-dom/global-registrator": "20.9.0",
+        "@testing-library/dom": "10.4.1",
+        "@testing-library/react": "16.3.2",
+        "@types/react": "19.2.15",
+        "@types/react-dom": "19.2.3",
+        "@walnut/core": "workspace:*",
+        "postgres": "3.4.9",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+      },
+      "peerDependencies": {
+        "react": ">=19",
+        "react-dom": ">=19",
+      },
+    },
     "packages/icons": {
       "name": "@walnut/icons",
       "version": "0.1.0",
@@ -126,11 +146,11 @@
     },
   },
   "packages": {
-    "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
+    "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 
-    "@babel/helper-validator-identifier": ["@babel/helper-validator-identifier@7.28.5", "", {}, "sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q=="],
+    "@babel/helper-validator-identifier": ["@babel/helper-validator-identifier@7.29.7", "", {}, "sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg=="],
 
-    "@babel/runtime": ["@babel/runtime@7.29.2", "", {}, "sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g=="],
+    "@babel/runtime": ["@babel/runtime@7.29.7", "", {}, "sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw=="],
 
     "@borewit/text-codec": ["@borewit/text-codec@0.2.2", "", {}, "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="],
 
@@ -387,6 +407,8 @@
     "@walnut/core": ["@walnut/core@workspace:packages/core"],
 
     "@walnut/db": ["@walnut/db@workspace:packages/db"],
+
+    "@walnut/db-viewer": ["@walnut/db-viewer@workspace:packages/db-viewer"],
 
     "@walnut/icons": ["@walnut/icons@workspace:packages/icons"],
 

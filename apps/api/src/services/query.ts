@@ -1,4 +1,5 @@
 import {
+  type AgentScope,
   classifySql,
   effectiveScopes,
   missingScopes,
@@ -94,4 +95,47 @@ export async function runAgentQuery(
   }
 
   return { ...result, requiredScopes: classification.requiredScopes }
+}
+
+/** The only scope the dashboard data viewer is allowed to exercise. */
+const VIEWER_SCOPES: readonly AgentScope[] = ['db:read']
+
+/**
+ * Run a parameterized, **read-only** query for the dashboard data viewer over the project's
+ * owner connection. The same SQL classifier that guards agents gates this to `db:read`, so the
+ * viewer (and its raw-query escape hatch) can never mutate data even though it runs as the
+ * owner. This backs `POST /api/projects/:id/sql`, which the `@walnut/db-viewer` Postgres adapter
+ * targets from the browser.
+ */
+export async function runReadOnlyQuery(project: Project, sql: string, params: unknown[]): Promise<QueryResult> {
+  if (project.status !== 'active' || project.connectionUri === null) {
+    throw new HttpError(409, {
+      error: 'project_not_ready',
+      message: `Project is "${project.status}"; its database is not ready for queries yet.`,
+    })
+  }
+
+  const classification = await classifySql(sql)
+  if (classification.empty) {
+    throw new HttpError(400, { error: 'empty_query', message: 'SQL statement is empty.' })
+  }
+
+  const missing = missingScopes(VIEWER_SCOPES, classification.requiredScopes)
+  if (missing.length > 0) {
+    throw new HttpError(403, {
+      error: 'read_only',
+      message: `The data viewer is read-only; this statement needs [${missing.join(', ')}]. Only db:read queries are allowed here.`,
+      requiredScopes: classification.requiredScopes,
+    })
+  }
+
+  try {
+    // readOnly is the engine-level backstop behind the classifier: the connection runs with
+    // default_transaction_read_only, so even a side-effecting function the classifier waved
+    // through as db:read (e.g. nextval()) is refused.
+    return await runSql(project.connectionUri, sql, params, { readOnly: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Query failed'
+    throw new HttpError(400, { error: 'query_error', message })
+  }
 }

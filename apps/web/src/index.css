@@ -95,6 +95,27 @@
   --color-danger: #f87171;
 }
 
+/* Map the embedded @walnut/db-viewer's own tokens onto the dashboard's semantic tokens, so the
+   data browser matches the site exactly and inherits the `.dark` flip for free. The doubled
+   class (`.wdv-root.walnut-dbv`) and the explicit `.dark` variant both out-specify the package's
+   own `.wdv-root` / `.dark .wdv-root` defaults regardless of stylesheet import order. */
+.wdv-root.walnut-dbv,
+.dark .wdv-root.walnut-dbv {
+  --wdv-canvas: var(--color-canvas);
+  --wdv-surface: var(--color-surface);
+  --wdv-sunken: var(--color-sunken);
+  --wdv-hover: var(--color-hover);
+  --wdv-line: var(--color-line);
+  --wdv-line-strong: var(--color-line-strong);
+  --wdv-fg: var(--color-fg);
+  --wdv-fg-secondary: var(--color-fg-secondary);
+  --wdv-muted: var(--color-muted);
+  --wdv-subtle: var(--color-subtle);
+  --wdv-faint: var(--color-faint);
+  --wdv-accent: var(--color-accent);
+  --wdv-danger: var(--color-danger);
+}
+
 :root {
   color-scheme: light;
 }
