@@ -1183,6 +1183,142 @@ describe('branches', () => {
     const res = await stranger.api.projects({ id: project.id }).branches.get()
     expect(res.status).toBe(404)
   })
+
+  test('POST creates a branch with its own active database', async () => {
+    const project = await newProject('makebranch')
+    const res = await h.api.api.projects({ id: project.id }).branches.post({ name: 'feature' })
+    expect(res.status).toBe(200)
+    expect(res.data?.name).toBe('feature')
+    expect(res.data?.isDefault).toBe(false)
+    expect(res.data?.status).toBe('active')
+    const list = await h.api.api.projects({ id: project.id }).branches.get()
+    expect((list.data ?? []).map((b) => b.name).toSorted()).toEqual(['feature', 'main'])
+  }, 20_000)
+
+  test('a branch is an isolated copy-on-write clone of its source', async () => {
+    const project = await newProject('cow')
+    const agent = await newAgent('cow-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
+    // Seed main, then branch it: the row present at branch time is copied.
+    await h.api.agent.v1.query.post({ sql: 'CREATE TABLE items (id int)' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO items VALUES (1)' }, { headers: auth })
+    const br = await h.api.api.projects({ id: project.id }).branches.post({ name: 'feature' })
+    expect(br.status).toBe(200)
+
+    const onBranch = await h.api.agent.v1.query.post(
+      { sql: 'SELECT count(*)::int AS c FROM items', branch: 'feature' },
+      { headers: auth },
+    )
+    expect(onBranch.data?.rows).toEqual([{ c: 1 }])
+
+    // A write on the branch does not appear on main, and a later write on main does not appear
+    // on the branch — the two databases have diverged.
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO items VALUES (2)', branch: 'feature' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO items VALUES (3)' }, { headers: auth })
+    const mainCount = await h.api.agent.v1.query.post({ sql: 'SELECT count(*)::int AS c FROM items' }, { headers: auth })
+    expect(mainCount.data?.rows).toEqual([{ c: 2 }]) // 1 (seed) + 3 (its own later write)
+    const branchCount = await h.api.agent.v1.query.post(
+      { sql: 'SELECT count(*)::int AS c FROM items', branch: 'feature' },
+      { headers: auth },
+    )
+    expect(branchCount.data?.rows).toEqual([{ c: 2 }]) // 1 (copied) + 2 (its own insert)
+  }, 30_000)
+
+  test('a branch can be created from a non-default source branch', async () => {
+    const project = await newProject('chain')
+    const agent = await newAgent('chain-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
+    // Build up state on a first branch, then branch *that* (not main).
+    await h.api.api.projects({ id: project.id }).branches.post({ name: 'staging' })
+    await h.api.agent.v1.query.post({ sql: 'CREATE TABLE s (id int)', branch: 'staging' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO s VALUES (1)', branch: 'staging' }, { headers: auth })
+
+    const child = await h.api.api.projects({ id: project.id }).branches.post({ name: 'staging-copy', from: 'staging' })
+    expect(child.status).toBe(200)
+    // The child sees staging's table+row; main never had it.
+    const onChild = await h.api.agent.v1.query.post(
+      { sql: 'SELECT count(*)::int AS c FROM s', branch: 'staging-copy' },
+      { headers: auth },
+    )
+    expect(onChild.data?.rows).toEqual([{ c: 1 }])
+    const onMain = await h.api.agent.v1.query.post(
+      { sql: "SELECT to_regclass('public.s') AS t" },
+      { headers: auth },
+    )
+    expect(onMain.data?.rows).toEqual([{ t: null }])
+  }, 30_000)
+
+  test('a duplicate branch name is rejected with 409', async () => {
+    const project = await newProject('dup')
+    const first = await h.api.api.projects({ id: project.id }).branches.post({ name: 'dev' })
+    expect(first.status).toBe(200)
+    const again = await h.api.api.projects({ id: project.id }).branches.post({ name: 'dev' })
+    expect(again.status).toBe(409)
+  }, 20_000)
+
+  test('an invalid branch name is rejected with 400', async () => {
+    const project = await newProject('badname')
+    const res = await h.api.api.projects({ id: project.id }).branches.post({ name: 'has spaces' })
+    expect(res.status).toBe(400)
+  })
+
+  test('the default branch cannot be deleted', async () => {
+    const project = await newProject('keepmain')
+    const res = await h.api.api.projects({ id: project.id }).branches({ branch: 'main' }).delete()
+    expect(res.status).toBe(400)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('cannot_delete_default')
+  })
+
+  test('deleting a branch drops its database and roles; the project and main are untouched', async () => {
+    const project = await newProject('delbranch')
+    const agent = await newAgent('delbranch-bot')
+    await grant(agent.apiKey, project.id, ['db:read'])
+    const br = await h.api.api.projects({ id: project.id }).branches.post({ name: 'temp' })
+    const branchId = br.data?.id ?? ''
+    // A query provisions a scope role on the branch's database.
+    await h.api.agent.v1.query.post({ sql: 'SELECT 1', branch: 'temp' }, { headers: bearer(agent.apiKey) })
+    const [row] = await h.ctx.db.select().from(branches).where(eq(branches.id, branchId))
+    const dbName = row?.providerBranchId ?? ''
+    const adminUri = new URL(row?.connectionUri ?? '')
+    adminUri.pathname = '/postgres'
+    const admin = adminUri.toString()
+    expect((await runSql(admin, 'SELECT 1 FROM pg_database WHERE datname = $1', [dbName])).rows.length).toBe(1)
+
+    const del = await h.api.api.projects({ id: project.id }).branches({ branch: 'temp' }).delete()
+    expect(del.data).toEqual({ deleted: true })
+
+    expect((await runSql(admin, 'SELECT 1 FROM pg_database WHERE datname = $1', [dbName])).rows.length).toBe(0)
+    expect((await runSql(admin, 'SELECT 1 FROM pg_roles WHERE rolname LIKE $1', [`${dbName}\\_%`])).rows.length).toBe(0)
+    const remaining = await h.api.api.projects({ id: project.id }).branches.get()
+    expect((remaining.data ?? []).map((b) => b.name)).toEqual(['main'])
+  }, 30_000)
+
+  test('deleting an unknown branch is 404', async () => {
+    const project = await newProject('nobranch')
+    const res = await h.api.api.projects({ id: project.id }).branches({ branch: 'ghost' }).delete()
+    expect(res.status).toBe(404)
+  })
+
+  test('the per-branch data-viewer sql route reads the targeted branch', async () => {
+    const project = await newProject('viewer')
+    const agent = await newAgent('viewer-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
+    await h.api.agent.v1.query.post({ sql: 'CREATE TABLE t (id int)' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO t VALUES (7)' }, { headers: auth })
+    await h.api.api.projects({ id: project.id }).branches.post({ name: 'b2' })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO t VALUES (8)', branch: 'b2' }, { headers: auth })
+
+    const main = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT count(*)::int AS c FROM t' })
+    expect(main.data?.rows).toEqual([{ c: 1 }])
+    const b2 = await h.api.api
+      .projects({ id: project.id })
+      .branches({ branch: 'b2' })
+      .sql.post({ sql: 'SELECT count(*)::int AS c FROM t' })
+    expect(b2.data?.rows).toEqual([{ c: 2 }])
+  }, 30_000)
 })
 
 describe('activity', () => {

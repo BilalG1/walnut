@@ -4,16 +4,26 @@ import type { AppContext } from '../context.ts'
 import { toActivityEventView, toBranchView, toProjectDetail, toProjectSummary } from '../serializers.ts'
 import { listProjectActivity } from '../services/activity.ts'
 import {
+  createBranch,
   createProject,
+  deleteBranch,
   deleteProject,
   getDefaultBranch,
   getProject,
   listBranches,
   listProjects,
+  resolveBranch,
 } from '../services/projects.ts'
 import { runReadOnlyQuery } from '../services/query.ts'
 
 const nameSchema = t.String({ minLength: 1, maxLength: 64 })
+
+/** Body for the read-only data-viewer SQL routes: a statement plus positional params. Scalars
+ * (bound to `$n`) plus arrays (for `= ANY($n)`); deliberately not bare objects. */
+const sqlBody = t.Object({
+  sql: t.String({ minLength: 1 }),
+  params: t.Optional(t.Array(t.Union([t.String(), t.Number(), t.Boolean(), t.Null(), t.Array(t.Unknown())]))),
+})
 
 export function projectRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/projects' })
@@ -48,31 +58,41 @@ export function projectRoutes(ctx: AppContext) {
       const rows = await listBranches(ctx, params.id, userId)
       return rows.map(toBranchView)
     })
+    .post(
+      '/:id/branches',
+      async ({ userId, params, body }) => toBranchView(await createBranch(ctx, params.id, userId, body)),
+      { body: t.Object({ name: nameSchema, from: t.Optional(t.String({ maxLength: 64 })) }) },
+    )
+    .delete('/:id/branches/:branch', async ({ userId, params }) => {
+      await deleteBranch(ctx, params.id, params.branch, userId)
+      return { deleted: true }
+    })
     .get('/:id/activity', async ({ userId, params }) => {
       const rows = await listProjectActivity(ctx, params.id, userId)
       return rows.map((r) => toActivityEventView(r.event, r.agentName))
     })
     // Read-only SQL for the dashboard data viewer. The `@walnut/db-viewer` Postgres adapter
     // (running in the browser) posts parameterized statements here. Two layers keep it read-only
-    // over the owner connection: the SQL classifier gates each statement to db:read (a clear 403
-    // for writes), and the query runs in a read-only transaction so the engine refuses anything
-    // the classifier might miss.
+    // over the branch's owner connection: the SQL classifier gates each statement to db:read (a
+    // clear 403 for writes), and the query runs in a read-only transaction so the engine refuses
+    // anything the classifier might miss. `/:id/sql` targets the default branch; the
+    // branch-qualified route targets a specific branch.
     .post(
       '/:id/sql',
       async ({ userId, params, body }) => {
-        // Membership check, then run over the default branch's database (the one the viewer shows).
         await getProject(ctx, params.id, userId)
         const main = await getDefaultBranch(ctx, params.id)
         return runReadOnlyQuery(main, body.sql, body.params ?? [])
       },
-      {
-        body: t.Object({
-          sql: t.String({ minLength: 1 }),
-          // Scalars (bound to `$n`) plus arrays (for `= ANY($n)`); deliberately not bare objects.
-          params: t.Optional(
-            t.Array(t.Union([t.String(), t.Number(), t.Boolean(), t.Null(), t.Array(t.Unknown())])),
-          ),
-        }),
+      { body: sqlBody },
+    )
+    .post(
+      '/:id/branches/:branch/sql',
+      async ({ userId, params, body }) => {
+        await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return runReadOnlyQuery(branch, body.sql, body.params ?? [])
       },
+      { body: sqlBody },
     )
 }

@@ -1,8 +1,8 @@
-import { type ProvisionedProject, setupProjectRoles } from '@walnut/core'
+import { type ProvisionedDatabase, type ProvisionedProject, setupProjectRoles } from '@walnut/core'
 import { agentGrants, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
 import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { HttpError, notFound } from '../errors.ts'
+import { badRequest, HttpError, notFound } from '../errors.ts'
 import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
 
 /** A user's projects: those in any organization they're a member of. */
@@ -294,4 +294,141 @@ export async function deleteProject(ctx: AppContext, id: string, userId: string)
       ),
     )
   await ctx.db.delete(projects).where(eq(projects.id, id))
+}
+
+/** Branch names: git-like, identifier/path-ish. Keeps names safe to show and to embed in
+ * URLs/CLI without quoting; the provider names its databases independently. */
+const BRANCH_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,63}$/
+
+/** A Postgres unique-constraint violation (SQLSTATE 23505) — the race backstop behind a
+ * best-effort existence pre-check. */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === '23505'
+}
+
+/**
+ * Create a branch of a project: a copy-on-write clone of a source branch (the named `from`, or
+ * the default) with its own provisioned database and scoped roles. Mirrors {@link createProject}'s
+ * provision-then-activate flow: the row is inserted `provisioning` to claim the unique name, the
+ * provider clones the database, group roles are set up on it, and the row flips to `active`. On
+ * failure the orphaned database is torn down and the row removed so the name is free to retry.
+ */
+export async function createBranch(
+  ctx: AppContext,
+  projectId: string,
+  userId: string,
+  input: { name: string; from?: string },
+): Promise<Branch> {
+  const project = await getProject(ctx, projectId, userId)
+  if (!BRANCH_NAME_RE.test(input.name)) {
+    throw badRequest('Invalid branch name. Use letters, digits, and ._/- (max 64 chars).')
+  }
+  const source = await resolveBranch(ctx, projectId, input.from)
+  if (source.status !== 'active' || source.connectionUri === null || source.providerBranchId === null) {
+    throw new HttpError(409, {
+      error: 'branch_not_ready',
+      message: `Source branch "${source.name}" is not ready to branch from.`,
+    })
+  }
+  // Clean 409 for a duplicate; the (projectId, name) unique constraint is the real backstop
+  // against a concurrent race, which we map to the same 409 rather than a generic 500.
+  const conflict = new HttpError(409, {
+    error: 'branch_exists',
+    message: `A branch named "${input.name}" already exists.`,
+  })
+  const [dupe] = await ctx.db
+    .select({ id: branches.id })
+    .from(branches)
+    .where(and(eq(branches.projectId, projectId), eq(branches.name, input.name)))
+    .limit(1)
+  if (dupe !== undefined) {
+    throw conflict
+  }
+
+  let created: Branch | undefined
+  try {
+    ;[created] = await ctx.db
+      .insert(branches)
+      .values({ projectId, name: input.name, isDefault: false, status: 'provisioning' })
+      .returning()
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw conflict
+    }
+    throw err
+  }
+  if (created === undefined) {
+    throw new HttpError(500, { error: 'internal_error', message: 'Failed to create branch.' })
+  }
+
+  let provisioned: ProvisionedDatabase | undefined
+  try {
+    provisioned = await ctx.provider.createBranch({
+      providerProjectId: project.providerProjectId,
+      name: input.name,
+      fromProviderBranchId: source.providerBranchId,
+    })
+    // The clone is a fresh database with no group roles of its own (roles are namespaced by db
+    // name), so set them up before any agent connects — same as a project's main branch.
+    await setupProjectRoles(provisioned.connectionUri)
+    const [updated] = await ctx.db
+      .update(branches)
+      .set({
+        status: 'active',
+        providerBranchId: provisioned.providerBranchId,
+        connectionUri: provisioned.connectionUri,
+        region: provisioned.region,
+      })
+      .where(eq(branches.id, created.id))
+      .returning()
+    return updated ?? created
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown provisioning error'
+    if (provisioned !== undefined) {
+      await ctx.provider
+        .destroyBranch({ providerProjectId: project.providerProjectId, providerBranchId: provisioned.providerBranchId })
+        .catch((e) => console.error(`Failed to clean up orphaned branch database for project ${projectId}:`, e))
+    }
+    // Drop the row so the name is free to retry (the branch never became usable).
+    await ctx.db.delete(branches).where(eq(branches.id, created.id))
+    throw new HttpError(502, {
+      error: 'provisioning_failed',
+      message: `Failed to provision branch database: ${message}`,
+    })
+  }
+}
+
+/**
+ * Delete a non-default branch: tear down its database (and cluster-global roles, for flat
+ * providers) and remove the rows anchored to it. The default branch can't be deleted (it's the
+ * project's primary database — delete the project instead). `branch_db_roles` cascade with the
+ * branch row; the polymorphic grants/scope-requests (no FK) are cleared explicitly.
+ */
+export async function deleteBranch(ctx: AppContext, projectId: string, name: string, userId: string): Promise<void> {
+  const project = await getProject(ctx, projectId, userId)
+  const branch = await resolveBranch(ctx, projectId, name)
+  if (branch.isDefault) {
+    throw new HttpError(400, {
+      error: 'cannot_delete_default',
+      message: 'The default branch cannot be deleted. Delete the project instead.',
+    })
+  }
+  if (branch.providerBranchId !== null) {
+    try {
+      await ctx.provider.destroyBranch({
+        providerProjectId: project.providerProjectId,
+        providerBranchId: branch.providerBranchId,
+      })
+    } catch (err) {
+      // Best-effort: still remove the metadata rows even if provider teardown fails.
+      console.error(`Failed to destroy branch database for branch ${branch.id}:`, err)
+    }
+  }
+  await ctx.db
+    .delete(agentGrants)
+    .where(and(eq(agentGrants.resourceType, 'branch'), eq(agentGrants.resourceId, branch.id)))
+  await ctx.db
+    .delete(scopeRequests)
+    .where(and(eq(scopeRequests.resourceType, 'branch'), eq(scopeRequests.resourceId, branch.id)))
+  await ctx.db.delete(branches).where(eq(branches.id, branch.id))
 }

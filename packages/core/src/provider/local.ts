@@ -47,16 +47,29 @@ export function createLocalProvider(adminUrl: string, dbPrefix = 'proj'): Databa
     const dbName = newDatabaseName(dbPrefix)
     assertSafeDbName(dbName)
     await withAdmin(async (admin) => {
-      if (fromDbName !== null) {
-        assertSafeDbName(fromDbName)
-        // `CREATE DATABASE ... TEMPLATE` requires no other sessions on the source, so evict them.
+      if (fromDbName === null) {
+        await admin.unsafe(`CREATE DATABASE "${dbName}"`)
+        return
+      }
+      assertSafeDbName(fromDbName)
+      // `CREATE DATABASE ... TEMPLATE` requires no other sessions on the source. Evict them,
+      // then create — retrying a few times in case a scoped role reconnects in the tiny gap
+      // between the terminate and the CREATE ("source database is being accessed by other users").
+      for (let attempt = 0; ; attempt++) {
+        // eslint-disable-next-line no-await-in-loop
         await admin`
           SELECT pg_terminate_backend(pid) FROM pg_stat_activity
           WHERE datname = ${fromDbName} AND pid <> pg_backend_pid()
         `
-        await admin.unsafe(`CREATE DATABASE "${dbName}" TEMPLATE "${fromDbName}"`)
-      } else {
-        await admin.unsafe(`CREATE DATABASE "${dbName}"`)
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await admin.unsafe(`CREATE DATABASE "${dbName}" TEMPLATE "${fromDbName}"`)
+          return
+        } catch (err) {
+          if (attempt >= 4 || !/being accessed by other users/i.test(String(err))) {
+            throw err
+          }
+        }
       }
     })
     return { providerBranchId: dbName, connectionUri: withDatabase(adminUrl, dbName), region: 'local' }
