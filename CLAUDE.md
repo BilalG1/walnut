@@ -189,3 +189,32 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
   Single-command/one-shot grants would extend `scope_requests` further.
 - **More resources:** the open scope string + the resource tree (`org`→`project`→`branch`→…) +
   provider abstractions remain the extension points for future domains (`fn:deploy`, storage, …).
+
+## Limits & rate limits
+
+The platform runs on **one shared Neon account**, so unbounded use by one tenant isn't just a
+bill — it can exhaust account-wide quotas (projects, branches/compute endpoints, the Neon API
+rate limit) shared by everyone. Every limit is defined in **one place** —
+`packages/core/src/limits.ts` (the single source of truth, like `ports.ts`) — and applied in
+three layers:
+
+- **Resource caps (`RESOURCE_LIMITS`)** — durable count ceilings checked with a `COUNT` *before*
+  any provider call: projects/org, branches/project, branches/org, agents/org, pending
+  scope-requests/agent. Enforced in the services (`createProject`/`createBranch`/`createAgent`/
+  `createScopeRequest`); over the limit → **403 `limit_exceeded`** with a machine-readable
+  `{ limit, max, scope }`. Count-then-insert is intentionally best-effort (no transaction), bounded
+  by concurrency. The org is the anchor — today one org == one user (JIT personal orgs).
+- **Per-request caps (`QUERY_LIMITS`)** — applied in the query path: SQL payload > 100 KB → **413
+  `sql_too_large`** before parsing; `runSql` truncates result sets to 10 k rows / 8 MB and flags
+  `truncated` (a default-LIMIT, not an error) so a `SELECT *` can't OOM the shared API server; the
+  per-statement `statement_timeout` (also here) bounds DB-side work on both the agent scope roles
+  and the viewer's owner connection.
+- **Rate limits (`RATE_LIMITS`) + concurrency** — an in-memory token-bucket limiter on the app
+  context (`createRateLimiter`, `packages/core/src/rate-limit.ts`; `enforceRate` in
+  `apps/api/src/rate-limit.ts`): per-agent query rate, per-user + global provisioning rate,
+  per-agent scope-request and key-rotation rate, plus a per-branch concurrent-query gauge. Over
+  budget → **429 `rate_limited`** with `retryAfterMs` + a `Retry-After` header. Adequate for the
+  single-instance MVP (process-local, lost on restart, with the resource caps as the durable
+  backstop); swap the limiter for a shared store (Redis) behind the same interface to span
+  instances. Tests inject a frozen-clock limiter and `reset()` it per case for determinism.
+  (`authPerIp` is defined but reserved — there's no first-party login endpoint to protect yet.)
