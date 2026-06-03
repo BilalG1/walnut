@@ -48,3 +48,12 @@ export { DEFAULT_WALNUT_API_URL, DEFAULT_WALNUT_WEB_URL } from './urls.ts'
 
 export { setupProjectRoles, ensureScopeRole, dropProjectRoles } from './roles.ts'
 export type { ScopeRole } from './roles.ts'
+
+export {
+  RESOURCE_LIMITS,
+  QUERY_LIMITS,
+  RATE_LIMITS,
+  MAX_CONCURRENT_QUERIES_PER_BRANCH,
+  byteLength,
+} from './limits.ts'
+export type { RateBudget, RateLimitName, LimitExceededInfo } from './limits.ts'
