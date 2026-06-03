@@ -208,6 +208,17 @@ export function toBranchView(b: Branch): BranchView {
   }
 }
 
+/** A single branch with its owner connection — the "Connection" panel's source. Kept off the
+ * list view ({@link toBranchView}) so the owner credential isn't sprayed across every branch
+ * fetch; only the per-branch detail route returns it. */
+export interface BranchDetailView extends BranchView {
+  connectionUri: string | null
+}
+
+export function toBranchDetail(b: Branch): BranchDetailView {
+  return { ...toBranchView(b), connectionUri: b.connectionUri }
+}
+
 /** One agent query attempt, as shown in the project activity feed. */
 export interface ActivityEventView {
   id: string

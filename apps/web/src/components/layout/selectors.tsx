@@ -1,7 +1,9 @@
 import { useNavigate } from '@tanstack/react-router'
-import { Check, ChevronDown, GitBranch } from '@walnut/icons'
+import { Check, ChevronDown, GitBranch, Plus } from '@walnut/icons'
 import { Avatar, Menu, MenuItem, MenuLabel } from '@walnut/ui'
+import { useState } from 'react'
 import { useBranches, useOrganizations, useOrgProjects } from '../../data/queries.ts'
+import { CreateBranchDialog } from '../../features/projects/CreateBranchDialog.tsx'
 
 const ORG_GRADIENT = 'from-indigo-400 to-sky-600'
 const TRIGGER = 'gap-2 px-2 py-1.5 text-sm hover:bg-hover'
@@ -77,35 +79,49 @@ export function ProjectSelector({ orgId, projectId }: { orgId: string; projectId
 export function BranchSelector({ orgId, projectId, branch }: { orgId: string; projectId: string; branch: string }) {
   const navigate = useNavigate()
   const { data: branches } = useBranches(projectId)
+  const [createOpen, setCreateOpen] = useState(false)
   return (
-    <Menu
-      triggerClassName={TRIGGER}
-      trigger={
-        <>
-          <GitBranch size={14} className="text-muted" />
-          <span className="font-mono text-sm">{branch}</span>
-          <ChevronDown size={14} className="text-subtle" />
-        </>
-      }
-    >
-      <MenuLabel>Branches · preview</MenuLabel>
-      {(branches ?? []).map((b) => (
-        <MenuItem
-          key={b.id}
-          active={b.name === branch}
-          onSelect={() =>
-            void navigate({
-              to: '/orgs/$orgId/projects/$projectId/branches/$branch',
-              params: { orgId, projectId, branch: b.name },
-            })
-          }
-        >
-          <GitBranch size={14} className="text-muted" />
-          <span className="flex-1 truncate font-mono">{b.name}</span>
-          {b.isDefault ? <span className="text-[10px] text-subtle">default</span> : null}
-          {b.name === branch ? <Check size={14} className="text-emerald-600 dark:text-emerald-400" /> : null}
+    <>
+      <Menu
+        triggerClassName={TRIGGER}
+        trigger={
+          <>
+            <GitBranch size={14} className="text-muted" />
+            <span className="font-mono text-sm">{branch}</span>
+            <ChevronDown size={14} className="text-subtle" />
+          </>
+        }
+      >
+        <MenuLabel>Branches</MenuLabel>
+        {(branches ?? []).map((b) => (
+          <MenuItem
+            key={b.id}
+            active={b.name === branch}
+            onSelect={() =>
+              void navigate({
+                to: '/orgs/$orgId/projects/$projectId/branches/$branch',
+                params: { orgId, projectId, branch: b.name },
+              })
+            }
+          >
+            <GitBranch size={14} className="text-muted" />
+            <span className="flex-1 truncate font-mono">{b.name}</span>
+            {b.isDefault ? <span className="text-[10px] text-subtle">default</span> : null}
+            {b.name === branch ? <Check size={14} className="text-emerald-600 dark:text-emerald-400" /> : null}
+          </MenuItem>
+        ))}
+        <MenuItem onSelect={() => setCreateOpen(true)}>
+          <Plus size={14} className="text-muted" />
+          <span className="flex-1 truncate text-subtle">New branch…</span>
         </MenuItem>
-      ))}
-    </Menu>
+      </Menu>
+      <CreateBranchDialog
+        orgId={orgId}
+        projectId={projectId}
+        fromBranch={branch}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
+    </>
   )
 }

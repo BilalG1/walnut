@@ -3,21 +3,21 @@ import { Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useState } from 'react'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
-import { useProject } from '../../data/queries.ts'
+import { useBranch } from '../../data/queries.ts'
 import { maskConnectionUri } from '../../lib/format.ts'
 
 export function DatabasePage() {
-  const { projectId } = useScope()
+  const { projectId, branch } = useScope()
   if (projectId === undefined) {
     return null
   }
-  return <DatabaseView projectId={projectId} />
+  return <DatabaseView projectId={projectId} branch={branch ?? 'main'} />
 }
 
-function DatabaseView({ projectId }: { projectId: string }) {
-  const { data: project, isPending, error } = useProject(projectId)
+function DatabaseView({ projectId, branch }: { projectId: string; branch: string }) {
+  const { data: branchData, isPending, error } = useBranch(projectId, branch)
   const [copied, setCopied] = useState(false)
-  const uri = project?.connectionUri ?? null
+  const uri = branchData?.connectionUri ?? null
 
   function copy() {
     if (uri === null) {
@@ -31,7 +31,9 @@ function DatabaseView({ projectId }: { projectId: string }) {
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Connection</h1>
-      <p className="mt-1 text-sm text-subtle">The owner connection for this branch's Postgres database.</p>
+      <p className="mt-1 text-sm text-subtle">
+        The owner connection for the <span className="font-mono">{branch}</span> branch's Postgres database.
+      </p>
 
       <div className="mt-6">
         {isPending ? (
@@ -39,7 +41,7 @@ function DatabaseView({ projectId }: { projectId: string }) {
         ) : error !== null ? (
           <p className="text-sm text-danger">{error.message}</p>
         ) : uri === null ? (
-          <EmptyState title="No connection yet" hint={`The database is ${project?.status ?? 'not ready'}.`} />
+          <EmptyState title="No connection yet" hint={`The database is ${branchData?.status ?? 'not ready'}.`} />
         ) : (
           <Card className="p-4">
             <div className="text-xs uppercase tracking-wide text-subtle">Connection string</div>

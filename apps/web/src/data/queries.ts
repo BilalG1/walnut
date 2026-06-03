@@ -114,6 +114,14 @@ export function useBranches(projectId: string) {
   })
 }
 
+/** One branch with its owner connection (for the Connection panel). */
+export function useBranch(projectId: string, branch: string) {
+  return useQuery({
+    queryKey: keys.branch(projectId, branch),
+    queryFn: () => unwrap(api.api.projects({ id: projectId }).branches({ branch }).get()),
+  })
+}
+
 export function useProject(projectId: string) {
   return useQuery({
     queryKey: keys.project(projectId),
@@ -121,10 +129,11 @@ export function useProject(projectId: string) {
   })
 }
 
-export function useActivity(projectId: string) {
+/** The query audit feed for one branch of a project. */
+export function useActivity(projectId: string, branch: string) {
   return useQuery({
-    queryKey: keys.activity(projectId),
-    queryFn: () => unwrap(api.api.projects({ id: projectId }).activity.get()),
+    queryKey: keys.activity(projectId, branch),
+    queryFn: () => unwrap(api.api.projects({ id: projectId }).activity.get({ query: { branch } })),
   })
 }
 
@@ -135,6 +144,30 @@ export function useDeleteProject(orgId: string) {
     mutationFn: (projectId: string) => unwrap(api.api.projects({ id: projectId }).delete()),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
+    },
+  })
+}
+
+/** Create a branch of a project (copy-on-write clone of `from`, or the default branch). Returns
+ * the created branch so the caller can navigate to it; refreshes the project's branch list. */
+export function useCreateBranch(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { name: string; from?: string }) =>
+      unwrap(api.api.projects({ id: projectId }).branches.post(input)),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.branches(projectId) })
+    },
+  })
+}
+
+/** Delete a non-default branch, then refresh the project's branch list. */
+export function useDeleteBranch(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (branch: string) => unwrap(api.api.projects({ id: projectId }).branches({ branch }).delete()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.branches(projectId) })
     },
   })
 }

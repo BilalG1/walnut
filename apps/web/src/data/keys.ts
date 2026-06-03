@@ -7,5 +7,9 @@ export const keys = {
   orgRequests: (orgId: string, status: string) => ['orgs', orgId, 'requests', status] as const,
   project: (projectId: string) => ['projects', projectId] as const,
   branches: (projectId: string) => ['projects', projectId, 'branches'] as const,
-  activity: (projectId: string) => ['projects', projectId, 'activity'] as const,
+  branch: (projectId: string, branch: string) => ['projects', projectId, 'branches', branch] as const,
+  activity: (projectId: string, branch?: string) =>
+    branch === undefined
+      ? (['projects', projectId, 'activity'] as const)
+      : (['projects', projectId, 'activity', branch] as const),
 }

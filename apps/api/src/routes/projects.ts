@@ -1,7 +1,13 @@
 import { Elysia, t } from 'elysia'
 import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
-import { toActivityEventView, toBranchView, toProjectDetail, toProjectSummary } from '../serializers.ts'
+import {
+  toActivityEventView,
+  toBranchDetail,
+  toBranchView,
+  toProjectDetail,
+  toProjectSummary,
+} from '../serializers.ts'
 import { listProjectActivity } from '../services/activity.ts'
 import {
   createBranch,
@@ -63,6 +69,10 @@ export function projectRoutes(ctx: AppContext) {
       async ({ userId, params, body }) => toBranchView(await createBranch(ctx, params.id, userId, body)),
       { body: t.Object({ name: nameSchema, from: t.Optional(t.String({ maxLength: 64 })) }) },
     )
+    .get('/:id/branches/:branch', async ({ userId, params }) => {
+      await getProject(ctx, params.id, userId)
+      return toBranchDetail(await resolveBranch(ctx, params.id, params.branch))
+    })
     .delete('/:id/branches/:branch', async ({ userId, params }) => {
       await deleteBranch(ctx, params.id, params.branch, userId)
       return { deleted: true }

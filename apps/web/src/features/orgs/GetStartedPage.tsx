@@ -249,7 +249,7 @@ function GetStartedView({ orgId }: { orgId: string }) {
               <PanelHeader
                 icon={<Database size={20} />}
                 title="Create your first project"
-                blurb="Every project gets a dedicated Postgres database with an inert main branch."
+                blurb="Every project starts with a main branch backed by its own dedicated Postgres database."
               />
               <form onSubmit={submitProject} className="mt-6">
                 <label htmlFor="gs-project" className="mb-1.5 block text-xs font-medium tracking-wide text-muted">

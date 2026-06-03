@@ -37,3 +37,6 @@ notes/
 .roo
 .trae
 .windsurf
+
+# Local agent-browser recordings/screenshots (not source)
+.artifacts/

@@ -2,8 +2,8 @@ import { Button, Dialog, Input } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
 import { useCreateProject } from '../../data/queries.ts'
 
-/** Create a project in the current org. Each project provisions a dedicated Postgres
- * database with an inert `main` branch; the dialog closes once it's created. */
+/** Create a project in the current org. Each project starts with a `main` branch backed by its
+ * own dedicated Postgres database; the dialog closes once it's created. */
 export function CreateProjectDialog({
   orgId,
   open,
@@ -47,8 +47,8 @@ export function CreateProjectDialog({
           />
         </div>
         <p className="text-xs text-subtle">
-          Each project gets a dedicated Postgres database with an inert{' '}
-          <span className="font-mono">main</span> branch.
+          Each project starts with a <span className="font-mono">main</span> branch backed by its own dedicated Postgres
+          database.
         </p>
         {create.error !== null ? <p className="text-xs text-danger">{create.error.message}</p> : null}
         <div className="flex justify-end gap-2 pt-1">

@@ -11,23 +11,25 @@ const STATUS: Record<string, { tone: BadgeTone; label: string }> = {
   error: { tone: 'amber', label: 'error' },
 }
 
-/** Branch activity: the audit feed of agent query attempts against this database. */
+/** Branch activity: the audit feed of agent query attempts against this branch's database. */
 export function ActivityPage() {
-  const { projectId } = useScope()
+  const { projectId, branch } = useScope()
   if (projectId === undefined) {
     return null
   }
-  return <ActivityView projectId={projectId} />
+  return <ActivityView projectId={projectId} branch={branch ?? 'main'} />
 }
 
-function ActivityView({ projectId }: { projectId: string }) {
-  const { data, isPending, error } = useActivity(projectId)
+function ActivityView({ projectId, branch }: { projectId: string; branch: string }) {
+  const { data, isPending, error } = useActivity(projectId, branch)
   const rows = data ?? []
 
   return (
     <PageContainer>
       <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
-      <p className="mt-1 text-sm text-subtle">Every query agents have run against this database — allowed and denied.</p>
+      <p className="mt-1 text-sm text-subtle">
+        Every query agents have run against the <span className="font-mono">{branch}</span> branch — allowed and denied.
+      </p>
 
       <div className="mt-6">
         {isPending ? (

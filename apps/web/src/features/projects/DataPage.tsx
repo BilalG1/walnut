@@ -13,14 +13,14 @@ import { unwrap } from '../../data/http.ts'
  * enforcing. We only theme it (mapping `--wdv-*` to the dashboard tokens, see index.css) and
  * lend it the dashboard's spinner/empty so it blends in. */
 export function DataPage() {
-  const { projectId } = useScope()
+  const { projectId, branch } = useScope()
   if (projectId === undefined) {
     return null
   }
-  return <DataView projectId={projectId} />
+  return <DataView projectId={projectId} branch={branch ?? 'main'} />
 }
 
-function DataView({ projectId }: { projectId: string }) {
+function DataView({ projectId, branch }: { projectId: string; branch: string }) {
   const adapter = useMemo(
     () =>
       createPostgresAdapter({
@@ -29,21 +29,24 @@ function DataView({ projectId }: { projectId: string }) {
           // typed that way, so narrow the adapter's looser `unknown[]` to match.
           const scalars = params as (string | number | boolean | null | unknown[])[]
           const result = await unwrap(
-            api.api.projects({ id: projectId }).sql.post({ sql, params: scalars }, { fetch: { signal: opts?.signal } }),
+            api.api
+              .projects({ id: projectId })
+              .branches({ branch })
+              .sql.post({ sql, params: scalars }, { fetch: { signal: opts?.signal } }),
           )
           return { rows: result.rows, fields: result.fields }
         },
       }),
-    [projectId],
+    [projectId, branch],
   )
 
   // No page header — the viewer fills the whole area below the top bar (3.5rem tall).
-  // key on projectId: switching projects is a different database, so remount the viewer for a
+  // key on projectId+branch: each branch is a different database, so remount the viewer for a
   // clean slate (table list, filter, selection) rather than swapping the adapter.
   return (
     <div className="h-[calc(100vh-3.5rem)] p-4">
       <DatabaseViewer
-        key={projectId}
+        key={`${projectId}:${branch}`}
         adapter={adapter}
         className="walnut-dbv h-full"
         components={{ Spinner, Empty: EmptyState }}
