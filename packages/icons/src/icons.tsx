@@ -155,3 +155,8 @@ export const Walnut = createIcon('Walnut', [
   { tag: 'path', attrs: { d: 'M5 8c3 2 3 6 0 8' } },
   { tag: 'path', attrs: { d: 'M19 8c-3 2-3 6 0 8' } },
 ])
+export const MoreHorizontal = createIcon('MoreHorizontal', [
+  { tag: 'circle', attrs: { cx: 12, cy: 12, r: 1 } },
+  { tag: 'circle', attrs: { cx: 19, cy: 12, r: 1 } },
+  { tag: 'circle', attrs: { cx: 5, cy: 12, r: 1 } },
+])

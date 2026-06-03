@@ -11,7 +11,7 @@ import { ActivityPage } from '../features/projects/ActivityPage.tsx'
 import { DatabasePage } from '../features/projects/DatabasePage.tsx'
 import { DataPage } from '../features/projects/DataPage.tsx'
 import { OverviewPage } from '../features/projects/OverviewPage.tsx'
-import { ProjectSettingsPage } from '../features/projects/SettingsPage.tsx'
+import { BranchSettingsPage } from '../features/projects/BranchSettingsPage.tsx'
 import { queryClient } from './queryClient.ts'
 
 const rootRoute = createRootRoute({ component: AppLayout })
@@ -74,7 +74,7 @@ const projectActivityRoute = createRoute({ getParentRoute: () => projectRoute, p
 const projectSettingsRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'settings',
-  component: ProjectSettingsPage,
+  component: BranchSettingsPage,
 })
 
 const routeTree = rootRoute.addChildren([
