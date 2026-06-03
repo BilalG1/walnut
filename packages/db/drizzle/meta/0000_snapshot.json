@@ -1,5 +1,5 @@
 {
-  "id": "02912fef-c0fc-4b2a-8687-9b2b778d04f5",
+  "id": "475149f9-1d68-4411-bb3d-ef8c25ff6a8d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -631,6 +631,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "sql": {
           "name": "sql",
           "type": "text",
@@ -703,6 +709,19 @@
           "tableTo": "projects",
           "columnsFrom": [
             "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "query_events_branch_id_branches_id_fk": {
+          "name": "query_events_branch_id_branches_id_fk",
+          "tableFrom": "query_events",
+          "tableTo": "branches",
+          "columnsFrom": [
+            "branch_id"
           ],
           "columnsTo": [
             "id"

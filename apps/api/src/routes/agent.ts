@@ -4,7 +4,7 @@ import type { AppContext } from '../context.ts'
 import { HttpError, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
-import { findAgentByKey, getAgentGrant, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
+import { agentScopesForBranch, findAgentByKey, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
 import { listProjectsInOrg, resolveBranch } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
@@ -44,18 +44,20 @@ export function agentApiRoutes(ctx: AppContext) {
     .post(
       '/query',
       async ({ agent, body }) => {
-        // Pick the target project (explicit, or the agent's sole granted project) and the
-        // target branch (named, or the default), then run over that branch's scoped connection
-        // for the grant's scopes — defense in depth behind the SQL classifier.
+        // Pick the target project (explicit, or the agent's sole granted project) and the target
+        // branch (named, or the default), then run over that branch's scoped connection for the
+        // agent's effective scopes there (the union of its project + branch grants) — defense in
+        // depth behind the SQL classifier.
         const project = await resolveAgentProject(ctx, agent, body.projectId)
         const branch = await resolveBranch(ctx, project.id, body.branch)
-        const grant = await getAgentGrant(ctx, agent.id, 'project', project.id)
+        const scopeRows = await agentScopesForBranch(ctx, agent.id, project.id, branch.id)
         const startedAt = Date.now()
         try {
-          const result = await runAgentQuery(ctx, branch, grant ?? null, body.sql)
+          const result = await runAgentQuery(ctx, branch, scopeRows, body.sql)
           await recordQueryEvent(ctx, {
             agentId: agent.id,
             projectId: project.id,
+            branchId: branch.id,
             sql: body.sql,
             status: 'ok',
             command: result.command,
@@ -66,12 +68,13 @@ export function agentApiRoutes(ctx: AppContext) {
           return result
         } catch (err) {
           // Record the two outcomes worth auditing: a scope denial and an engine error.
-          // (Empty SQL / project-not-ready are client mistakes, not activity.)
+          // (Empty SQL / branch-not-ready are client mistakes, not activity.)
           if (err instanceof HttpError && (err.body.error === 'insufficient_scope' || err.body.error === 'query_error')) {
             const required = Array.isArray(err.body.requiredScopes) ? (err.body.requiredScopes as string[]) : []
             await recordQueryEvent(ctx, {
               agentId: agent.id,
               projectId: project.id,
+              branchId: branch.id,
               sql: body.sql,
               status: err.body.error === 'insufficient_scope' ? 'denied' : 'error',
               requiredScopes: required,

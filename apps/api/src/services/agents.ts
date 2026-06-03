@@ -21,7 +21,7 @@ import {
   type GrantResourceType,
   type Project,
 } from '@walnut/db'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
 import { assertOrgMember } from './organizations.ts'
@@ -269,6 +269,35 @@ export async function deleteAgent(ctx: AppContext, id: string, userId: string): 
 export async function findAgentByKey(ctx: AppContext, key: string): Promise<Agent | undefined> {
   const [row] = await ctx.db.select().from(agents).where(eq(agents.keyHash, hashKey(key))).limit(1)
   return row
+}
+
+/**
+ * The scope rows that govern an agent on a specific branch — the union of its grants on that
+ * branch and on the parent project (the resource chain). A grant anchored to the project applies
+ * to every branch; a grant anchored to the branch adds to it. Org grants carry no database scopes
+ * (SCOPES_BY_RESOURCE.org is empty) so they never affect a database connection and are omitted.
+ * Returned as raw rows (with expiry) so the caller applies expiry at query time.
+ */
+export async function agentScopesForBranch(
+  ctx: AppContext,
+  agentId: string,
+  projectId: string,
+  branchId: string,
+): Promise<ScopeWithExpiry[]> {
+  const grants = await ctx.db
+    .select()
+    .from(agentGrants)
+    .where(
+      and(
+        eq(agentGrants.agentId, agentId),
+        or(
+          and(eq(agentGrants.resourceType, 'project'), eq(agentGrants.resourceId, projectId)),
+          and(eq(agentGrants.resourceType, 'branch'), eq(agentGrants.resourceId, branchId)),
+        ),
+      ),
+    )
+  const withScopes = await attachScopes(ctx, grants)
+  return withScopes.flatMap((g) => g.scopes)
 }
 
 /** The agent's grant for a given resource (its access there, with scope rows), if any. */

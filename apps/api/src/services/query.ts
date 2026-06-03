@@ -6,11 +6,12 @@ import {
   type QueryResult,
   runSql,
   SCOPE_DESCRIPTIONS,
+  type ScopeWithExpiry,
 } from '@walnut/core'
 import type { Branch } from '@walnut/db'
 import type { AppContext } from '../context.ts'
 import { HttpError } from '../errors.ts'
-import { connectionForScopes, type GrantWithScopes } from './agents.ts'
+import { connectionForScopes } from './agents.ts'
 
 export interface AgentQueryResult extends QueryResult {
   requiredScopes: string[]
@@ -32,7 +33,7 @@ export interface AgentQueryResult extends QueryResult {
 export async function runAgentQuery(
   ctx: AppContext,
   branch: Branch,
-  grant: GrantWithScopes | null,
+  scopeRows: readonly ScopeWithExpiry[],
   sql: string,
 ): Promise<AgentQueryResult> {
   if (branch.status !== 'active' || branch.connectionUri === null) {
@@ -48,7 +49,8 @@ export async function runAgentQuery(
   }
 
   const now = new Date()
-  const granted = grant === null ? [] : effectiveScopes(grant.scopes, now)
+  // Effective scopes = the union over the agent's grant chain for this branch, expiry-filtered.
+  const granted = effectiveScopes(scopeRows, now)
   const missing = missingScopes(granted, classification.requiredScopes)
   if (missing.length > 0) {
     throw new HttpError(403, {

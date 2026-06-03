@@ -234,6 +234,8 @@ export const queryEvents = pgTable('query_events', {
   projectId: uuid('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
+  /** The branch the query ran against. Null only for pre-branch rows; new events always set it. */
+  branchId: uuid('branch_id').references(() => branches.id, { onDelete: 'cascade' }),
   sql: text('sql').notNull(),
   /** Postgres command tag (SELECT/INSERT/…) when the query ran; null otherwise. */
   command: text('command'),

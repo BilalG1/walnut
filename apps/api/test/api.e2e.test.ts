@@ -1321,6 +1321,170 @@ describe('branches', () => {
   }, 30_000)
 })
 
+describe('cascading grants and per-branch activity', () => {
+  /** Create a branch and return its id. */
+  async function makeBranch(projectId: string, name: string, from?: string): Promise<string> {
+    const res = await h.api.api.projects({ id: projectId }).branches.post(from === undefined ? { name } : { name, from })
+    const id = res.data?.id
+    if (id === undefined) {
+      throw new Error(`createBranch failed: ${JSON.stringify(res.error?.value)}`)
+    }
+    return id
+  }
+
+  /** Grant scopes to an agent anchored to a specific branch, then approve. */
+  async function grantBranch(
+    apiKey: string,
+    branchId: string,
+    scopes: ('db:read' | 'db:write' | 'db:delete' | 'db:ddl')[],
+  ): Promise<void> {
+    const req = await h.api.agent.v1['scope-requests'].post(
+      { scopes, resourceType: 'branch', resourceId: branchId },
+      { headers: bearer(apiKey) },
+    )
+    const id = req.data?.id
+    if (id === undefined) {
+      throw new Error(`branch scope request failed: ${JSON.stringify(req.error?.value)}`)
+    }
+    await h.api.api['scope-requests']({ id }).approve.post()
+  }
+
+  test('a branch-anchored grant works on its branch but not on the others', async () => {
+    const project = await newProject('branchgrant')
+    const featureId = await makeBranch(project.id, 'feature')
+    const agent = await newAgent('branch-bot')
+    const auth = bearer(agent.apiKey)
+    await grantBranch(agent.apiKey, featureId, ['db:read'])
+
+    const onFeature = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n', branch: 'feature' }, { headers: auth })
+    expect(onFeature.status).toBe(200)
+    // No grant covers the default branch, so the same query is denied there.
+    const onMain = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: auth })
+    expect(onMain.status).toBe(403)
+  }, 30_000)
+
+  test('a project-level grant cascades to every branch', async () => {
+    const project = await newProject('cascade')
+    await makeBranch(project.id, 'feature')
+    const agent = await newAgent('cascade-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read'])
+
+    expect((await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: auth })).status).toBe(200)
+    const onFeature = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n', branch: 'feature' }, { headers: auth })
+    expect(onFeature.status).toBe(200)
+  }, 30_000)
+
+  test('branch and project grants union (project read+ddl, branch adds write on one branch)', async () => {
+    const project = await newProject('union')
+    const featureId = await makeBranch(project.id, 'feature')
+    const agent = await newAgent('union-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read', 'db:ddl']) // cascades to all branches
+    await grantBranch(agent.apiKey, featureId, ['db:write']) // adds write only on feature
+
+    // On feature the effective set is {read, ddl, write}: create + insert both succeed.
+    expect(
+      (await h.api.agent.v1.query.post({ sql: 'CREATE TABLE t (id int)', branch: 'feature' }, { headers: auth }))
+        .status,
+    ).toBe(200)
+    const wFeature = await h.api.agent.v1.query.post(
+      { sql: 'INSERT INTO t VALUES (1)', branch: 'feature' },
+      { headers: auth },
+    )
+    expect(wFeature.status).toBe(200)
+
+    // On main the effective set is {read, ddl} (no write): create succeeds, insert is denied.
+    expect((await h.api.agent.v1.query.post({ sql: 'CREATE TABLE t (id int)' }, { headers: auth })).status).toBe(200)
+    const wMain = await h.api.agent.v1.query.post({ sql: 'INSERT INTO t VALUES (1)' }, { headers: auth })
+    expect(wMain.status).toBe(403)
+    expect((wMain.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['db:write'])
+  }, 30_000)
+
+  test('query activity records the branch and can be filtered by it', async () => {
+    const project = await newProject('actbranch')
+    await makeBranch(project.id, 'feature')
+    const agent = await newAgent('actbranch-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read'])
+    await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: auth }) // main
+    await h.api.agent.v1.query.post({ sql: 'SELECT 2 AS n', branch: 'feature' }, { headers: auth }) // feature
+
+    const all = await h.api.api.projects({ id: project.id }).activity.get()
+    expect(all.data?.length).toBe(2)
+    expect(new Set((all.data ?? []).map((e) => e.branch))).toEqual(new Set(['main', 'feature']))
+
+    const onlyFeature = await h.api.api.projects({ id: project.id }).activity.get({ query: { branch: 'feature' } })
+    expect(onlyFeature.data?.length).toBe(1)
+    expect(onlyFeature.data?.[0]?.branch).toBe('feature')
+  }, 30_000)
+
+  test('an expired branch-grant scope drops from the union while project scopes persist', async () => {
+    const project = await newProject('expunion')
+    const featureId = await makeBranch(project.id, 'feature')
+    const agent = await newAgent('expunion-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read']) // permanent, cascades to feature
+    // A time-boxed branch write on feature.
+    const req = await h.api.agent.v1['scope-requests'].post(
+      { scopes: ['db:write'], expiresInSeconds: 3600, resourceType: 'branch', resourceId: featureId },
+      { headers: auth },
+    )
+    await h.api.api['scope-requests']({ id: req.data?.id ?? '' }).approve.post()
+
+    // While valid, a write passes the classifier (engine then errors on the missing table → 400).
+    const before = await h.api.agent.v1.query.post(
+      { sql: 'INSERT INTO t VALUES (1)', branch: 'feature' },
+      { headers: auth },
+    )
+    expect(before.status).toBe(400)
+
+    // Expire the branch write scope directly.
+    const [bg] = await h.ctx.db
+      .select()
+      .from(agentGrants)
+      .where(
+        and(
+          eq(agentGrants.agentId, agent.id),
+          eq(agentGrants.resourceType, 'branch'),
+          eq(agentGrants.resourceId, featureId),
+        ),
+      )
+    await h.ctx.db
+      .update(agentGrantScopes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(and(eq(agentGrantScopes.grantId, bg?.id ?? ''), eq(agentGrantScopes.scope, 'db:write')))
+
+    // Write is now denied (dropped from the union); the cascaded project read still works.
+    const after = await h.api.agent.v1.query.post(
+      { sql: 'INSERT INTO t VALUES (1)', branch: 'feature' },
+      { headers: auth },
+    )
+    expect(after.status).toBe(403)
+    expect((after.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['db:write'])
+    const read = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n', branch: 'feature' }, { headers: auth })
+    expect(read.status).toBe(200)
+  }, 30_000)
+
+  test('a denied query is recorded against the branch it targeted', async () => {
+    const project = await newProject('denybranch')
+    await makeBranch(project.id, 'feature')
+    const agent = await newAgent('denybranch-bot')
+    const auth = bearer(agent.apiKey)
+    await grant(agent.apiKey, project.id, ['db:read']) // read only → a write is denied
+    const denied = await h.api.agent.v1.query.post(
+      { sql: 'INSERT INTO t VALUES (1)', branch: 'feature' },
+      { headers: auth },
+    )
+    expect(denied.status).toBe(403)
+
+    const acts = await h.api.api.projects({ id: project.id }).activity.get({ query: { branch: 'feature' } })
+    expect(acts.data?.length).toBe(1)
+    expect(acts.data?.[0]?.status).toBe('denied')
+    expect(acts.data?.[0]?.branch).toBe('feature')
+  }, 30_000)
+})
+
 describe('activity', () => {
   test('agent queries (allowed and denied) are recorded in project activity', async () => {
     const project = await newProject('act')

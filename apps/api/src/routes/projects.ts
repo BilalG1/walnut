@@ -67,10 +67,14 @@ export function projectRoutes(ctx: AppContext) {
       await deleteBranch(ctx, params.id, params.branch, userId)
       return { deleted: true }
     })
-    .get('/:id/activity', async ({ userId, params }) => {
-      const rows = await listProjectActivity(ctx, params.id, userId)
-      return rows.map((r) => toActivityEventView(r.event, r.agentName))
-    })
+    .get(
+      '/:id/activity',
+      async ({ userId, params, query }) => {
+        const rows = await listProjectActivity(ctx, params.id, userId, { branch: query.branch })
+        return rows.map((r) => toActivityEventView(r.event, r.agentName, r.branchName))
+      },
+      { query: t.Object({ branch: t.Optional(t.String()) }) },
+    )
     // Read-only SQL for the dashboard data viewer. The `@walnut/db-viewer` Postgres adapter
     // (running in the browser) posts parameterized statements here. Two layers keep it read-only
     // over the branch's owner connection: the SQL classifier gates each statement to db:read (a

@@ -1,13 +1,15 @@
-import { agents, queryEvents, type QueryEvent, type QueryEventStatus } from '@walnut/db'
-import { desc, eq } from 'drizzle-orm'
+import { agents, branches, queryEvents, type QueryEvent, type QueryEventStatus } from '@walnut/db'
+import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { getProject } from './projects.ts'
+import { getProject, resolveBranch } from './projects.ts'
 
 const MAX_SQL = 10_000
 
 export interface RecordQueryInput {
   agentId: string
   projectId: string
+  /** The branch the query targeted. */
+  branchId: string
   sql: string
   status: QueryEventStatus
   command?: string | null
@@ -26,6 +28,7 @@ export async function recordQueryEvent(ctx: AppContext, input: RecordQueryInput)
     await ctx.db.insert(queryEvents).values({
       agentId: input.agentId,
       projectId: input.projectId,
+      branchId: input.branchId,
       sql: input.sql.slice(0, MAX_SQL),
       command: input.command ?? null,
       requiredScopes: input.requiredScopes ?? [],
@@ -42,22 +45,31 @@ export async function recordQueryEvent(ctx: AppContext, input: RecordQueryInput)
 export interface ActivityRow {
   event: QueryEvent
   agentName: string
+  /** The name of the branch the query ran against (null for legacy rows without a branch). */
+  branchName: string | null
 }
 
-/** Recent query events for a project (caller must be a member of its org). */
+/**
+ * Recent query events for a project (caller must be a member of its org), newest first.
+ * Optionally scoped to a single branch by name (`branch`) — the per-branch activity view.
+ */
 export async function listProjectActivity(
   ctx: AppContext,
   projectId: string,
   userId: string,
-  limit = 100,
+  opts: { branch?: string; limit?: number } = {},
 ): Promise<ActivityRow[]> {
   await getProject(ctx, projectId, userId)
+  const branchId = opts.branch === undefined ? undefined : (await resolveBranch(ctx, projectId, opts.branch)).id
   const rows = await ctx.db
-    .select({ event: queryEvents, agentName: agents.name })
+    .select({ event: queryEvents, agentName: agents.name, branchName: branches.name })
     .from(queryEvents)
     .innerJoin(agents, eq(queryEvents.agentId, agents.id))
-    .where(eq(queryEvents.projectId, projectId))
+    .leftJoin(branches, eq(queryEvents.branchId, branches.id))
+    .where(
+      and(eq(queryEvents.projectId, projectId), branchId !== undefined ? eq(queryEvents.branchId, branchId) : undefined),
+    )
     .orderBy(desc(queryEvents.createdAt))
-    .limit(limit)
-  return rows.map((r) => ({ event: r.event, agentName: r.agentName }))
+    .limit(opts.limit ?? 100)
+  return rows.map((r) => ({ event: r.event, agentName: r.agentName, branchName: r.branchName }))
 }

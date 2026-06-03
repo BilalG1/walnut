@@ -213,6 +213,8 @@ export interface ActivityEventView {
   id: string
   agentId: string
   agentName: string
+  /** The branch the query ran against (null for legacy rows). */
+  branch: string | null
   sql: string
   command: string | null
   requiredScopes: string[]
@@ -223,11 +225,12 @@ export interface ActivityEventView {
   createdAt: string
 }
 
-export function toActivityEventView(event: QueryEvent, agentName: string): ActivityEventView {
+export function toActivityEventView(event: QueryEvent, agentName: string, branchName: string | null): ActivityEventView {
   return {
     id: event.id,
     agentId: event.agentId,
     agentName,
+    branch: branchName,
     sql: event.sql,
     command: event.command,
     requiredScopes: event.requiredScopes,
