@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@elysiajs/cors": "1.4.2",
+    "@sentry/bun": "^10.54.0",
     "@walnut/core": "workspace:*",
     "@walnut/db": "workspace:*",
     "drizzle-orm": "0.45.2",

@@ -3,7 +3,11 @@ import { createHexclaveServerClient, type HexclaveServerClient } from './auth/he
 import { createRemoteVerifier } from './auth/verify.ts'
 import { createContext } from './context.ts'
 import { loadEnv } from './env.ts'
+import { initSentry, isSentryEnabled } from './observability.ts'
 import { ensureSeed } from './seed.ts'
+
+// Initialize error reporting before anything else can throw, so startup failures are captured.
+initSentry()
 
 const env = loadEnv()
 const verifier = createRemoteVerifier({ projectId: env.auth.projectId, apiBaseUrl: env.auth.apiBaseUrl })
@@ -30,4 +34,6 @@ if (env.devAuth.enabled) {
 const app = createApp(ctx, { corsOrigins: env.corsOrigins, devLogin })
 app.listen(env.port)
 
-console.log(`🌰 Walnut API listening on http://localhost:${env.port} (provider: ${ctx.provider.kind})`)
+console.log(
+  `🌰 Walnut API listening on http://localhost:${env.port} (provider: ${ctx.provider.kind}, sentry: ${isSentryEnabled() ? 'on' : 'off'})`,
+)

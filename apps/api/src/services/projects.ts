@@ -9,6 +9,7 @@ import { agentGrants, branches, organizationMembers, projects, scopeRequests, ty
 import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { badRequest, HttpError, limitExceeded, notFound, providerCapacity } from '../errors.ts'
+import { captureException } from '../observability.ts'
 import { enforceRate } from '../rate-limit.ts'
 import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
 
@@ -269,6 +270,12 @@ export async function createProject(
         await teardownProvider(ctx, provisioned.providerProjectId, [provisioned.defaultBranch.providerBranchId])
       } catch (teardownErr) {
         console.error(`Failed to clean up orphaned database for project ${created.id}:`, teardownErr)
+        // A leaked provider resource we couldn't reclaim — report it so ops can reconcile.
+        captureException(teardownErr, {
+          op: 'createProject.teardown',
+          projectId: created.id,
+          providerProjectId: provisioned.providerProjectId,
+        })
         leakedProjectId = provisioned.providerProjectId
         leakedBranchId = provisioned.defaultBranch.providerBranchId
       }
@@ -324,8 +331,10 @@ export async function deleteProject(ctx: AppContext, id: string, userId: string)
       projBranches.map((b) => b.providerBranchId),
     )
   } catch (err) {
-    // Best-effort: drop the metadata rows even if the provider teardown fails.
+    // Best-effort: drop the metadata rows even if the provider teardown fails. Report the
+    // leak so the orphaned provider resource is visible for manual reconciliation.
     console.error(`Failed to destroy provider databases for project ${id}:`, err)
+    captureException(err, { op: 'deleteProject.teardown', projectId: id, providerProjectId: project.providerProjectId })
   }
   // agent_grants / scope_requests reference resources polymorphically (no FK cascade), so
   // clear the rows anchored to this project and its branches before dropping it. Agents are
@@ -477,6 +486,12 @@ export async function createBranch(
         })
       } catch (teardownErr) {
         console.error(`Failed to clean up orphaned branch database for project ${projectId}:`, teardownErr)
+        captureException(teardownErr, {
+          op: 'createBranch.teardown',
+          projectId,
+          branchId: created.id,
+          providerBranchId: provisioned.providerBranchId,
+        })
         leaked = true
       }
     }
@@ -523,8 +538,14 @@ export async function deleteBranch(ctx: AppContext, projectId: string, name: str
         providerBranchId: branch.providerBranchId,
       })
     } catch (err) {
-      // Best-effort: still remove the metadata rows even if provider teardown fails.
+      // Best-effort: still remove the metadata rows even if provider teardown fails. Report
+      // the leak so the orphaned provider resource is visible for manual reconciliation.
       console.error(`Failed to destroy branch database for branch ${branch.id}:`, err)
+      captureException(err, {
+        op: 'deleteBranch.teardown',
+        branchId: branch.id,
+        providerBranchId: branch.providerBranchId,
+      })
     }
   }
   await ctx.db

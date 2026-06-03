@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@elysiajs/eden": "1.4.9",
+    "@sentry/bun": "^10.54.0",
     "@walnut/api": "workspace:*",
     "@walnut/core": "workspace:*"
   },

@@ -1,6 +1,7 @@
 import { agents, branches, queryEvents, type QueryEvent, type QueryEventStatus } from '@walnut/db'
 import { and, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
+import { captureException } from '../observability.ts'
 import { getProject, resolveBranch } from './projects.ts'
 
 const MAX_SQL = 10_000
@@ -38,7 +39,10 @@ export async function recordQueryEvent(ctx: AppContext, input: RecordQueryInput)
       durationMs: input.durationMs ?? null,
     })
   } catch (err) {
+    // Swallowed so audit-logging can't break the query response — but a persistent failure
+    // here means we're losing the activity feed, so surface it rather than only logging.
     console.error('Failed to record query event:', err)
+    captureException(err, { op: 'recordQueryEvent', agentId: input.agentId, projectId: input.projectId })
   }
 }
 

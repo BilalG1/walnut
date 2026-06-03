@@ -3,6 +3,7 @@ import { Elysia } from 'elysia'
 import type { HexclaveServerClient } from './auth/hexclave-server.ts'
 import type { AppContext } from './context.ts'
 import { HttpError } from './errors.ts'
+import { captureException } from './observability.ts'
 import { agentApiRoutes } from './routes/agent.ts'
 import { agentRoutes } from './routes/agents.ts'
 import { devAuthRoutes } from './routes/dev-auth.ts'
@@ -44,6 +45,9 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
       set.status = 500
       const message = error instanceof Error ? error.message : 'Internal server error'
       console.error('Unhandled error:', error)
+      // The catch-all: anything reaching here is an unexpected server fault, so report it.
+      // HttpError/VALIDATION/NOT_FOUND are handled above and never get here.
+      captureException(error, { elysiaCode: code })
       return { error: 'internal_error', message }
     })
     .get('/health', () => ({ status: 'ok' as const }))
