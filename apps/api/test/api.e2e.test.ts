@@ -1176,6 +1176,80 @@ describe('organizations', () => {
   })
 })
 
+describe('org members', () => {
+  const BOB = '88888888-8888-8888-8888-888888888888'
+
+  test('GET /:orgId/members lists the roster (the founding owner)', async () => {
+    const orgId = await personalOrgId()
+    const res = await h.api.api.organizations({ orgId }).members.get()
+    expect(res.status).toBe(200)
+    expect(res.data?.length).toBe(1)
+    expect(res.data?.[0]?.userId).toBe(SYSTEM_USER_ID)
+    expect(res.data?.[0]?.role).toBe('owner')
+    expect(res.data?.[0]?.email).toBe('system@walnut.cloud')
+  })
+
+  test('a non-member cannot list an org\'s members (404, no existence leak)', async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('99999999-9999-9999-9999-999999999999', { email: 'stranger9@example.com' })
+    expect((await stranger.api.organizations({ orgId }).members.get()).status).toBe(404)
+  })
+
+  test('removing a member drops them from the roster', async () => {
+    const orgId = await personalOrgId()
+    // Provision Bob (he gets his own personal org) and add him to this org as a plain member.
+    const bob = await h.clientFor(BOB, { email: 'bob8@example.com' })
+    await bob.api.organizations.get()
+    await h.ctx.db.insert(organizationMembers).values({ organizationId: orgId, userId: BOB, role: 'member' })
+    expect((await h.api.api.organizations({ orgId }).members.get()).data?.length).toBe(2)
+
+    const rm = await h.api.api.organizations({ orgId }).members({ memberId: BOB }).delete()
+    expect(rm.status).toBe(200)
+    expect(rm.data).toEqual({ removed: true })
+
+    const after = await h.api.api.organizations({ orgId }).members.get()
+    expect(after.data?.length).toBe(1)
+    expect(after.data?.some((m) => m.userId === BOB)).toBe(false)
+  })
+
+  test('removing one of two owners succeeds (only the *last* owner is protected)', async () => {
+    const orgId = await personalOrgId()
+    const bob = await h.clientFor(BOB, { email: 'bob8@example.com' })
+    await bob.api.organizations.get()
+    // A second owner alongside the founder, so neither is the "last" owner.
+    await h.ctx.db.insert(organizationMembers).values({ organizationId: orgId, userId: BOB, role: 'owner' })
+
+    const rm = await h.api.api.organizations({ orgId }).members({ memberId: BOB }).delete()
+    expect(rm.status).toBe(200)
+    const after = await h.api.api.organizations({ orgId }).members.get()
+    expect(after.data?.length).toBe(1)
+    expect(after.data?.[0]?.userId).toBe(SYSTEM_USER_ID)
+  })
+
+  test("removing the org's last owner is refused (400, would orphan it)", async () => {
+    const orgId = await personalOrgId()
+    const res = await h.api.api.organizations({ orgId }).members({ memberId: SYSTEM_USER_ID }).delete()
+    expect(res.status).toBe(400)
+    // The owner is still there.
+    expect((await h.api.api.organizations({ orgId }).members.get()).data?.length).toBe(1)
+  })
+
+  test('removing a user who is not a member is 404', async () => {
+    const orgId = await personalOrgId()
+    const res = await h.api.api.organizations({ orgId }).members({ memberId: BOB }).delete()
+    expect(res.status).toBe(404)
+  })
+
+  test('a non-member cannot remove anyone from the org (404)', async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', { email: 'strangerA@example.com' })
+    const res = await stranger.api.organizations({ orgId }).members({ memberId: SYSTEM_USER_ID }).delete()
+    expect(res.status).toBe(404)
+    // ...and the owner is untouched.
+    expect((await h.api.api.organizations({ orgId }).members.get()).data?.length).toBe(1)
+  })
+})
+
 describe('branches', () => {
   test('GET /api/projects/:id/branches returns the default main branch', async () => {
     const project = await newProject('branchy')

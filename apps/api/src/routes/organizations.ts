@@ -3,6 +3,7 @@ import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import {
   toAgentView,
+  toMemberView,
   toOrgAgentView,
   toOrgProjectSummary,
   toOrgSummary,
@@ -10,7 +11,7 @@ import {
   toScopeRequestView,
 } from '../serializers.ts'
 import { createAgent, listOrgAgents } from '../services/agents.ts'
-import { listOrganizations } from '../services/organizations.ts'
+import { listMembers, listOrganizations, removeMember } from '../services/organizations.ts'
 import { createProject, getDefaultBranch, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
 
@@ -58,6 +59,14 @@ export function organizationRoutes(ctx: AppContext) {
       },
       { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
     )
+    .get('/:orgId/members', async ({ userId, params }) => {
+      const rows = await listMembers(ctx, params.orgId, userId)
+      return rows.map(toMemberView)
+    })
+    .delete('/:orgId/members/:memberId', async ({ userId, params }) => {
+      await removeMember(ctx, params.orgId, params.memberId, userId)
+      return { removed: true }
+    })
     .get(
       '/:orgId/requests',
       async ({ userId, params, query }) => {

@@ -131,6 +131,18 @@ export function toOrgSummary(org: Organization, role: string): OrgSummary {
   }
 }
 
+/** A member in the org roster: who they are, their role, and when they joined. */
+export interface MemberView {
+  userId: string
+  email: string
+  role: string
+  joinedAt: string
+}
+
+export function toMemberView(m: { userId: string; email: string; role: string; joinedAt: Date }): MemberView {
+  return { userId: m.userId, email: m.email, role: m.role, joinedAt: m.joinedAt.toISOString() }
+}
+
 /** A project as shown on the org home: summary plus the at-a-glance counts the cards display. */
 export interface OrgProjectSummary extends ProjectSummary {
   agentCount: number
