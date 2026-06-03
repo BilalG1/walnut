@@ -12,14 +12,45 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-walnut-50: #faf6f2;
-  --color-walnut-100: #f1e6da;
-  --color-walnut-200: #e9d8c8;
-  --color-walnut-300: #d9bfa3;
-  --color-walnut-400: #c9a98a;
-  --color-walnut-500: #a9805a;
-  --color-walnut-600: #8a6443;
-  --color-walnut-700: #6f4f34;
+  /* ── Layer-1 design knobs ──────────────────────────────────────────────────
+     The whole dashboard's shape derives from these few variables. Change one and
+     it cascades everywhere, because every component reads the Tailwind utilities
+     these tokens back (`rounded-*`, `p-*`/`gap-*`/`h-*`, `font-*`).
+
+     Rounding — one knob. The graduated radius scale is preserved (so nested
+     elements stay concentric: cards rounder than the buttons inside them), but
+     every step derives from --radius-base. Set it to 0 for a sharp UI, or larger
+     for a pill-soft one. `rounded-full` is intentionally NOT derived (pills/avatars
+     must stay circular). */
+  --radius-base: 0.25rem;
+  --radius-sm: calc(var(--radius-base) * 0.5);
+  --radius-md: calc(var(--radius-base) * 1);
+  --radius-lg: calc(var(--radius-base) * 1.5);
+  --radius-xl: calc(var(--radius-base) * 2);
+  --radius-2xl: calc(var(--radius-base) * 2.667);
+
+  /* Density — one knob. Tailwind's entire spacing scale is calc(var(--spacing) * N),
+     so this single value rescales all padding, gaps, and spacing-derived sizes
+     (heights, widths) at once. Smaller = denser, larger = roomier. */
+  --spacing: 0.235rem;
+
+  /* Typography — one knob each. Components use `font-sans`/`font-mono` (and the body
+     rule below reads --font-sans), so swapping a stack here re-fonts the whole app. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Brand scale — a neutral zinc ramp for the monochrome "onyx" identity. Components
+     reference these as `walnut-*` (primary buttons + hover at 500/600, focus rings,
+     subtle tints), so keeping the names lets the whole UI stay monochrome with no
+     component edits. */
+  --color-walnut-50: #fafafa;
+  --color-walnut-100: #f4f4f5;
+  --color-walnut-200: #e4e4e7;
+  --color-walnut-300: #d4d4d8;
+  --color-walnut-400: #a1a1aa;
+  --color-walnut-500: #52525b;
+  --color-walnut-600: #3f3f46;
+  --color-walnut-700: #27272a;
 
   /* Semantic tokens — the single source of theming. Values here are the LIGHT theme;
      the `.dark` block below overrides the same variables for dark. Every component reads
@@ -29,7 +60,7 @@
        line     hairlines & dividers     line-strong  control borders
        fg       primary text             fg-secondary slightly dimmer body text
        muted    secondary text           subtle   labels / metadata
-       faint    faintest text            accent   walnut text & icons
+       faint    faintest text            accent   accent text & icons
        danger   destructive text */
   --color-canvas: #f6f6f7;
   --color-surface: #ffffff;
@@ -42,25 +73,25 @@
   --color-muted: #57575f;
   --color-subtle: #71717a;
   --color-faint: #a1a1aa;
-  --color-accent: #8a6443;
+  --color-accent: #3f3f46;
   --color-danger: #dc2626;
 }
 
-/* Dark theme overrides. These hexes are the app's original dark palette, so dark mode
-   stays pixel-faithful to what shipped before light mode existed. */
+/* Dark theme = the "onyx" palette: OLED-true-black canvas, neutral greys, near-white
+   accent. This is the primary, designed-for surface of the dashboard. */
 .dark {
-  --color-canvas: #0a0a0b;
-  --color-surface: #171717;
-  --color-sunken: #0a0a0a;
-  --color-hover: #262626;
-  --color-line: #262626;
-  --color-line-strong: #404040;
-  --color-fg: #e7e7ea;
-  --color-fg-secondary: #d4d4d4;
-  --color-muted: #a3a3a3;
-  --color-subtle: #737373;
-  --color-faint: #525252;
-  --color-accent: #c9a98a;
+  --color-canvas: #000000;
+  --color-surface: #0e0e10;
+  --color-sunken: #070708;
+  --color-hover: #1a1a1d;
+  --color-line: #1c1c1f;
+  --color-line-strong: #34343a;
+  --color-fg: #f4f4f5;
+  --color-fg-secondary: #d4d4d8;
+  --color-muted: #a1a1aa;
+  --color-subtle: #71717a;
+  --color-faint: #45454d;
+  --color-accent: #fafafa;
   --color-danger: #f87171;
 }
 
@@ -81,7 +112,7 @@ body {
   margin: 0;
   background-color: var(--color-canvas);
   color: var(--color-fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   /* Ease the cross-fade when toggling themes (kept short so navigation feels instant). */
   transition: background-color 0.2s ease, color 0.2s ease;
 }
