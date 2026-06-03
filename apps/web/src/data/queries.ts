@@ -53,6 +53,79 @@ export function useOrgAgents(orgId: string) {
   })
 }
 
+/** The org's member roster (user, role, joined-at). */
+export function useOrgMembers(orgId: string) {
+  return useQuery({
+    queryKey: keys.orgMembers(orgId),
+    queryFn: () => unwrap(api.api.organizations({ orgId }).members.get()),
+  })
+}
+
+/** Remove a member (or leave, by passing your own id). Refreshes the roster. */
+export function useRemoveMember(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (memberId: string) => unwrap(api.api.organizations({ orgId }).members({ memberId }).delete()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgMembers(orgId) })
+    },
+  })
+}
+
+/** The org's live (pending, unexpired) invite links. */
+export function useOrgInvitations(orgId: string) {
+  return useQuery({
+    queryKey: keys.orgInvitations(orgId),
+    queryFn: () => unwrap(api.api.organizations({ orgId }).invitations.get()),
+  })
+}
+
+/** Mint a fresh invite link. The response carries the one-time token (build the shareable URL
+ * from it; it's never shown again). Refreshes the pending-invites list. */
+export function useCreateInvitation(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => unwrap(api.api.organizations({ orgId }).invitations.post({})),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgInvitations(orgId) })
+    },
+  })
+}
+
+/** Revoke (kill) an invite link, then refresh the pending-invites list. */
+export function useRevokeInvitation(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      unwrap(api.api.organizations({ orgId }).invitations({ invitationId }).delete()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgInvitations(orgId) })
+    },
+  })
+}
+
+/** Preview an invite link before redeeming it: the org + role it grants, whether it's still
+ * valid, and whether you're already a member. No retry — a 404 means an unknown/dead token. */
+export function useInvitePreview(token: string) {
+  return useQuery({
+    queryKey: keys.invitePreview(token),
+    queryFn: () => unwrap(api.api.invitations({ token }).get()),
+    retry: false,
+  })
+}
+
+/** Redeem an invite link: join the signed-in user to the org. Returns `{ organizationId }` so the
+ * caller can navigate there; refreshes the org list so the new org appears in the switcher. */
+export function useAcceptInvite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (token: string) => unwrap(api.api.invitations({ token }).accept.post()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgs() })
+    },
+  })
+}
+
 export function useOrgRequests(
   orgId: string,
   status: 'pending' | 'approved' | 'denied',

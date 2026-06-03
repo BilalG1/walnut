@@ -1,11 +1,13 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { AppLayout } from '../components/layout/AppLayout.tsx'
+import { AcceptInvitePage } from '../features/AcceptInvitePage.tsx'
 import { keys } from '../data/keys.ts'
 import { fetchMe, fetchOrganizations } from '../data/queries.ts'
 import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
 import { AgentDetailPage } from '../features/orgs/AgentDetailPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { GetStartedPage } from '../features/orgs/GetStartedPage.tsx'
+import { MembersPage } from '../features/orgs/MembersPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
 import { ActivityPage } from '../features/projects/ActivityPage.tsx'
@@ -42,6 +44,9 @@ const indexRoute = createRoute({
   component: () => <div className="p-8 text-sm text-subtle">You don&apos;t belong to any organization yet.</div>,
 })
 
+// Invite redemption (not org-scoped — the org is resolved from the token) ----
+const acceptInviteRoute = createRoute({ getParentRoute: () => rootRoute, path: 'invite/$token', component: AcceptInvitePage })
+
 // Org scope -----------------------------------------------------------------
 const orgRoute = createRoute({ getParentRoute: () => rootRoute, path: 'orgs/$orgId' })
 const orgIndexRoute = createRoute({ getParentRoute: () => orgRoute, path: '/', component: ProjectsPage })
@@ -53,11 +58,7 @@ const orgAgentDetailRoute = createRoute({
   component: AgentDetailPage,
 })
 const orgRequestsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'requests', component: RequestsPage })
-const orgMembersRoute = createRoute({
-  getParentRoute: () => orgRoute,
-  path: 'members',
-  component: () => <PlaceholderPage title="Members" />,
-})
+const orgMembersRoute = createRoute({ getParentRoute: () => orgRoute, path: 'members', component: MembersPage })
 const orgSettingsRoute = createRoute({
   getParentRoute: () => orgRoute,
   path: 'settings',
@@ -85,6 +86,7 @@ const projectSettingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  acceptInviteRoute,
   orgRoute.addChildren([
     orgIndexRoute,
     orgGetStartedRoute,

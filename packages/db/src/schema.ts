@@ -57,6 +57,39 @@ export const organizationMembers = pgTable(
   (t) => [primaryKey({ columns: [t.organizationId, t.userId] })],
 )
 
+/** Lifecycle of an org invite link: live, redeemed, or cancelled. */
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked'
+
+/**
+ * A link-based invitation into a (shared) organization. Link-only: creating one mints a
+ * secret token (returned once, embedded in a shareable URL); only its SHA-256 hash is stored,
+ * so the link can never be re-derived. Whoever opens the link while signed in redeems it and
+ * joins as `role`. There's no invitee email — an invite is a capability, contained by a single
+ * use plus `expiresAt` and explicit revocation (`status = 'revoked'`).
+ */
+export const organizationInvitations = pgTable('organization_invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  /** The role the redeemer joins with. */
+  role: text('role').$type<OrgRole>().notNull().default('member'),
+  /** SHA-256 of the invite token; the token itself lives only in the link, shown once. */
+  tokenHash: text('token_hash').notNull().unique(),
+  /** Non-secret leading slice of the token, kept so the dashboard can tell links apart. */
+  tokenPrefix: text('token_prefix').notNull(),
+  /** Who created the invite (provenance only). Null if that user is later deleted — an
+   * invite is a capability anchored to the org, so it stays redeemable regardless. */
+  invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  status: text('status').$type<InvitationStatus>().notNull().default('pending'),
+  /** When the link stops working; a redeemed (`accepted`) or revoked link is dead regardless. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  /** Who redeemed it (null until accepted; kept null if that user is later deleted). */
+  acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt,
+})
+
 export const projects = pgTable('projects', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id')
@@ -253,6 +286,8 @@ export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert
 export type OrganizationMember = typeof organizationMembers.$inferSelect
 export type NewOrganizationMember = typeof organizationMembers.$inferInsert
+export type OrganizationInvitation = typeof organizationInvitations.$inferSelect
+export type NewOrganizationInvitation = typeof organizationInvitations.$inferInsert
 export type Branch = typeof branches.$inferSelect
 export type NewBranch = typeof branches.$inferInsert
 export type Project = typeof projects.$inferSelect

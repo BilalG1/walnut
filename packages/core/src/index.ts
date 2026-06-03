@@ -18,7 +18,7 @@ export type { AgentScope, DbScope, GrantResourceType, ScopeWithExpiry } from './
 export { classifySql } from './sql.ts'
 export type { SqlClassification } from './sql.ts'
 
-export { SYSTEM_USER_ID, newId, newAgentKey, hashKey, keyPrefix, newDatabaseName } from './ids.ts'
+export { SYSTEM_USER_ID, newId, newAgentKey, newInviteToken, hashKey, keyPrefix, newDatabaseName } from './ids.ts'
 
 export { createProvider } from './provider/index.ts'
 export type {

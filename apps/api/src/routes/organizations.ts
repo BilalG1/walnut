@@ -3,6 +3,8 @@ import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import {
   toAgentView,
+  toInvitationView,
+  toMemberView,
   toOrgAgentView,
   toOrgProjectSummary,
   toOrgSummary,
@@ -10,7 +12,8 @@ import {
   toScopeRequestView,
 } from '../serializers.ts'
 import { createAgent, listOrgAgents } from '../services/agents.ts'
-import { listOrganizations } from '../services/organizations.ts'
+import { createInvitation, listInvitations, revokeInvitation } from '../services/invitations.ts'
+import { listMembers, listOrganizations, removeMember } from '../services/organizations.ts'
 import { createProject, getDefaultBranch, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
 
@@ -58,6 +61,32 @@ export function organizationRoutes(ctx: AppContext) {
       },
       { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
     )
+    .get('/:orgId/members', async ({ userId, params }) => {
+      const rows = await listMembers(ctx, params.orgId, userId)
+      return rows.map(toMemberView)
+    })
+    .delete('/:orgId/members/:memberId', async ({ userId, params }) => {
+      await removeMember(ctx, params.orgId, params.memberId, userId)
+      return { removed: true }
+    })
+    .post(
+      '/:orgId/invitations',
+      async ({ userId, params, body }) => {
+        // Link-only: returns the one-time token so the UI can build a shareable link. No invitee
+        // email — the token is the capability, bounded by single use + expiry + revocation.
+        const { invitation, token } = await createInvitation(ctx, params.orgId, userId, { role: body.role })
+        return { ...toInvitationView(invitation), token }
+      },
+      { body: t.Object({ role: t.Optional(t.Union([t.Literal('member'), t.Literal('admin')])) }) },
+    )
+    .get('/:orgId/invitations', async ({ userId, params }) => {
+      const rows = await listInvitations(ctx, params.orgId, userId)
+      return rows.map(toInvitationView)
+    })
+    .delete('/:orgId/invitations/:invitationId', async ({ userId, params }) => {
+      await revokeInvitation(ctx, params.orgId, params.invitationId, userId)
+      return { revoked: true }
+    })
     .get(
       '/:orgId/requests',
       async ({ userId, params, query }) => {

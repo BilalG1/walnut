@@ -1,5 +1,15 @@
 import { type AgentScope, effectiveScopes, type ScopeWithExpiry } from '@walnut/core'
-import type { Agent, AgentGrant, Branch, Organization, Project, QueryEvent, ScopeRequest, User } from '@walnut/db'
+import type {
+  Agent,
+  AgentGrant,
+  Branch,
+  Organization,
+  OrganizationInvitation,
+  Project,
+  QueryEvent,
+  ScopeRequest,
+  User,
+} from '@walnut/db'
 
 /** The authenticated user's own profile (`GET /api/me`). `onboardingCompletedAt` drives
  * the first-run routing and sidebar gating; null means onboarding isn't finished. */
@@ -128,6 +138,40 @@ export function toOrgSummary(org: Organization, role: string): OrgSummary {
     isPersonal: org.isPersonal,
     role,
     createdAt: org.createdAt.toISOString(),
+  }
+}
+
+/** A member in the org roster: who they are, their role, and when they joined. */
+export interface MemberView {
+  userId: string
+  email: string
+  role: string
+  joinedAt: string
+}
+
+export function toMemberView(m: { userId: string; email: string; role: string; joinedAt: Date }): MemberView {
+  return { userId: m.userId, email: m.email, role: m.role, joinedAt: m.joinedAt.toISOString() }
+}
+
+/** A live invite link as shown in the org's Members page. Never carries the token (only its
+ * non-secret prefix); the full token is returned once, separately, at creation. */
+export interface InvitationView {
+  id: string
+  role: string
+  status: string
+  tokenPrefix: string
+  expiresAt: string
+  createdAt: string
+}
+
+export function toInvitationView(inv: OrganizationInvitation): InvitationView {
+  return {
+    id: inv.id,
+    role: inv.role,
+    status: inv.status,
+    tokenPrefix: inv.tokenPrefix,
+    expiresAt: inv.expiresAt.toISOString(),
+    createdAt: inv.createdAt.toISOString(),
   }
 }
 

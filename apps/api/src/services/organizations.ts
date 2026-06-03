@@ -2,7 +2,7 @@ import { organizationMembers, organizations, users, type Organization, type OrgR
 import { and, asc, desc, eq } from 'drizzle-orm'
 import type { AuthClaims } from '../auth/verify.ts'
 import type { AppContext } from '../context.ts'
-import { HttpError, notFound } from '../errors.ts'
+import { badRequest, HttpError, notFound } from '../errors.ts'
 
 function internalError(message: string): HttpError {
   return new HttpError(500, { error: 'internal_error', message })
@@ -121,4 +121,59 @@ export async function assertOrgMember(ctx: AppContext, orgId: string, userId: st
   if (row === undefined) {
     throw notFound('Organization')
   }
+}
+
+/** A row of the org roster: the member's user id, email, role, and when they joined. */
+export interface OrgMemberRow {
+  userId: string
+  email: string
+  role: OrgRole
+  joinedAt: Date
+}
+
+/** Every member of the org, oldest first (so the founding owner leads). Caller must be a member. */
+export async function listMembers(ctx: AppContext, orgId: string, userId: string): Promise<OrgMemberRow[]> {
+  await assertOrgMember(ctx, orgId, userId)
+  return ctx.db
+    .select({
+      userId: organizationMembers.userId,
+      email: users.email,
+      role: organizationMembers.role,
+      joinedAt: organizationMembers.createdAt,
+    })
+    .from(organizationMembers)
+    .innerJoin(users, eq(organizationMembers.userId, users.id))
+    .where(eq(organizationMembers.organizationId, orgId))
+    .orderBy(asc(organizationMembers.createdAt))
+}
+
+/**
+ * Remove a member from an org. The caller must be a member (any member can manage membership —
+ * no role gate yet). Refuses to remove the org's *last owner*, which would orphan it; this is a
+ * data-integrity guard, not a permission (best-effort: the count-then-delete isn't serialized, so
+ * two simultaneous owner-removals could still race — acceptable for the MVP). 404 if the target
+ * isn't a member. Passing the caller's own id is "leave the org" — subject to the same guard.
+ */
+export async function removeMember(ctx: AppContext, orgId: string, targetUserId: string, userId: string): Promise<void> {
+  await assertOrgMember(ctx, orgId, userId)
+  const [target] = await ctx.db
+    .select({ role: organizationMembers.role })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.userId, targetUserId)))
+    .limit(1)
+  if (target === undefined) {
+    throw notFound('Member')
+  }
+  if (target.role === 'owner') {
+    const owners = await ctx.db
+      .select({ userId: organizationMembers.userId })
+      .from(organizationMembers)
+      .where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.role, 'owner')))
+    if (owners.length <= 1) {
+      throw badRequest("Can't remove the organization's last owner.")
+    }
+  }
+  await ctx.db
+    .delete(organizationMembers)
+    .where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.userId, targetUserId)))
 }
