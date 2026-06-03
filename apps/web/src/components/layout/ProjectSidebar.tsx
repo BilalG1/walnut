@@ -1,7 +1,7 @@
 import { Link, useLocation } from '@tanstack/react-router'
 import { Activity, ArrowLeft, Database, LayoutDashboard, Settings } from '@walnut/icons'
 import { cn } from '@walnut/ui'
-import { useOrganizations, useOrgProjects } from '../../data/queries.ts'
+import { useOrganizations } from '../../data/queries.ts'
 
 const BASE =
   'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-walnut-500/50'
@@ -17,9 +17,7 @@ const SUB_ACTIVE = cn(SUB_BASE, 'border-walnut-500 bg-walnut-500/[0.06] text-acc
 
 export function ProjectSidebar({ orgId, projectId, branch }: { orgId: string; projectId: string; branch: string }) {
   const { data: orgs } = useOrganizations()
-  const { data: projects } = useOrgProjects(orgId)
   const orgName = orgs?.find((o) => o.id === orgId)?.name ?? 'organization'
-  const projectName = projects?.find((p) => p.id === projectId)?.name ?? 'project'
   const params = { orgId, projectId, branch }
 
   // Expand the Database subtabs whenever any database route is active.
@@ -36,14 +34,7 @@ export function ProjectSidebar({ orgId, projectId, branch }: { orgId: string; pr
       >
         <ArrowLeft size={13} /> {orgName}
       </Link>
-      <div className="mb-3 flex items-center gap-2 px-2">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-        <div className="leading-tight">
-          <div className="text-[13px] font-medium">{projectName}</div>
-          <div className="font-mono text-[10px] text-subtle">{branch}</div>
-        </div>
-      </div>
-      <nav className="space-y-0.5">
+      <nav className="mt-3 space-y-0.5">
         <Link
           to="/orgs/$orgId/projects/$projectId/branches/$branch"
           params={params}

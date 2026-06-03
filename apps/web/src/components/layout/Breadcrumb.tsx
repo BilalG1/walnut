@@ -1,5 +1,3 @@
-import { Link } from '@tanstack/react-router'
-import { Walnut } from '@walnut/icons'
 import { useScope } from '../../app/useScope.ts'
 import { BranchSelector, OrgSelector, ProjectSelector } from './selectors.tsx'
 
@@ -8,22 +6,10 @@ import { BranchSelector, OrgSelector, ProjectSelector } from './selectors.tsx'
 export function Breadcrumb() {
   const { orgId, projectId, branch } = useScope()
   if (orgId === undefined) {
-    return (
-      <span className="flex items-center gap-2 text-sm font-medium">
-        <Walnut size={20} className="text-accent" /> Walnut
-      </span>
-    )
+    return <span className="text-sm font-medium">Walnut</span>
   }
   return (
     <div className="flex items-center gap-1.5">
-      <Link
-        to="/orgs/$orgId"
-        params={{ orgId }}
-        className="mr-0.5 rounded-md text-accent outline-none focus-visible:ring-2 focus-visible:ring-walnut-500/50"
-        aria-label="Walnut home"
-      >
-        <Walnut size={20} />
-      </Link>
       <OrgSelector orgId={orgId} />
       {projectId !== undefined && branch !== undefined ? (
         <>
