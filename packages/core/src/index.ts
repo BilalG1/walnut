@@ -10,7 +10,8 @@ export {
   parseScopesForResource,
   missingScopes,
   effectiveScopes,
-  sameScopeSet,
+  scopeMask,
+  scopeSetKey,
 } from './scopes.ts'
 export type { AgentScope, DbScope, GrantResourceType, ScopeWithExpiry } from './scopes.ts'
 
@@ -42,11 +43,5 @@ export type { PortService, LocalDbUrlOptions } from './ports.ts'
 
 export { DEFAULT_WALNUT_API_URL, DEFAULT_WALNUT_WEB_URL } from './urls.ts'
 
-export {
-  setupProjectRoles,
-  createAgentRole,
-  syncAgentScopes,
-  dropAgentRole,
-  dropProjectRoles,
-} from './roles.ts'
-export type { AgentRole } from './roles.ts'
+export { setupProjectRoles, ensureScopeRole, dropProjectRoles } from './roles.ts'
+export type { ScopeRole } from './roles.ts'

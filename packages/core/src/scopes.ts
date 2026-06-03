@@ -93,6 +93,39 @@ export function missingScopes(held: readonly AgentScope[], required: readonly Ag
   return ALL_SCOPES.filter((s) => required.includes(s) && !heldSet.has(s))
 }
 
+/** Bit per database scope, so a set of scopes collapses to one canonical integer (a
+ * "scope set" identity). Only `db:*` scopes carry a bit — they're the ones backed by a
+ * Postgres group role, so the mask is exactly what selects a shared scoped connection.
+ * Future non-database scopes (e.g. `fn:deploy`) have no engine role and don't widen it. */
+const DB_SCOPE_BIT: Record<DbScope, number> = {
+  'db:read': 1,
+  'db:write': 2,
+  'db:delete': 4,
+  'db:ddl': 8,
+}
+
+/** Canonical bitmask for the database scopes in `scopes` (non-database scopes ignored). */
+export function scopeMask(scopes: readonly AgentScope[]): number {
+  const held = new Set<string>(scopes)
+  let mask = 0
+  for (const s of DB_SCOPES) {
+    if (held.has(s)) {
+      mask |= DB_SCOPE_BIT[s]
+    }
+  }
+  return mask
+}
+
+/**
+ * Canonical key for a *set* of database scopes — the unit a shared per-database scoped role
+ * (and its connection) is keyed by. Two agents whose effective database scopes match share a
+ * role, so this collapses the scope list to one stable string regardless of order/duplicates.
+ * `'0'` means "no database access" (no role, no connection).
+ */
+export function scopeSetKey(scopes: readonly AgentScope[]): string {
+  return String(scopeMask(scopes))
+}
+
 /** A scope an agent holds, with its optional expiry (`null` = permanent). The unit of
  * a grant that carries time — see `effectiveScopes`. */
 export interface ScopeWithExpiry {
@@ -115,13 +148,4 @@ export function effectiveScopes(entries: readonly ScopeWithExpiry[], now: Date =
     }
   }
   return ALL_SCOPES.filter((s) => live.has(s))
-}
-
-/** Whether two scope lists are equal as canonical (display-ordered) sets. Used to
- * compare a grant's `syncedScopes` snapshot against its current effective scopes. */
-export function sameScopeSet(a: readonly AgentScope[] | null, b: readonly AgentScope[]): boolean {
-  if (a === null || a.length !== b.length) {
-    return false
-  }
-  return a.every((s, i) => s === b[i])
 }

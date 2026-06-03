@@ -1,5 +1,5 @@
 {
-  "id": "4c1e8750-f371-45a9-be4e-0924dd21e7f1",
+  "id": "237ad502-36c2-47b6-9e87-d816148b6463",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -100,24 +100,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "db_role": {
-          "name": "db_role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "connection_uri": {
-          "name": "connection_uri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "synced_scopes": {
-          "name": "synced_scopes",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -436,6 +418,80 @@
           "nullsNotDistinct": false,
           "columns": [
             "personal_user_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.project_db_roles": {
+      "name": "project_db_roles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope_key": {
+          "name": "scope_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "db_role": {
+          "name": "db_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_uri": {
+          "name": "connection_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "project_db_roles_project_id_projects_id_fk": {
+          "name": "project_db_roles_project_id_projects_id_fk",
+          "tableFrom": "project_db_roles",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "project_db_roles_project_scope_unique": {
+          "name": "project_db_roles_project_scope_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "project_id",
+            "scope_key"
           ]
         }
       },
@@ -767,6 +823,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "onboarding_completed_at": {
+          "name": "onboarding_completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

@@ -1,20 +1,18 @@
 import {
   type AgentScope,
-  createAgentRole,
-  dropAgentRole,
   effectiveScopes,
+  ensureScopeRole,
   hashKey,
   keyPrefix,
   newAgentKey,
-  sameScopeSet,
+  scopeSetKey,
   type ScopeWithExpiry,
-  syncAgentScopes,
 } from '@walnut/core'
 import {
   agentGrants,
   agentGrantScopes,
   agents,
-  branches,
+  projectDbRoles,
   projects,
   type Agent,
   type AgentGrant,
@@ -79,33 +77,6 @@ async function projectNames(ctx: AppContext, ids: string[]): Promise<Map<string,
   }
   const rows = await ctx.db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, ids))
   return new Map(rows.map((r) => [r.id, r.name]))
-}
-
-/**
- * The owner (admin) connection URI of a grantable resource's database, or null when the
- * resource has no database of its own (an `org`). A `branch` resolves to its parent
- * project's database (branches are inert today — the project's database *is* the branch).
- */
-async function resourceConnectionUri(
-  ctx: AppContext,
-  resourceType: GrantResourceType,
-  resourceId: string,
-): Promise<string | null> {
-  if (resourceType === 'org') {
-    return null
-  }
-  if (resourceType === 'branch') {
-    const [branch] = await ctx.db
-      .select({ projectId: branches.projectId })
-      .from(branches)
-      .where(eq(branches.id, resourceId))
-      .limit(1)
-    if (branch === undefined) {
-      throw notFound('Branch')
-    }
-    return (await getProjectInternal(ctx, branch.projectId)).connectionUri
-  }
-  return (await getProjectInternal(ctx, resourceId)).connectionUri
 }
 
 /** The ids of the projects an agent currently holds a project grant on. */
@@ -275,13 +246,6 @@ export async function rotateAgentKey(
   return { agent: updated, grants, apiKey }
 }
 
-/** Best-effort drop of an agent role during error recovery; logs but never throws. */
-async function rollbackAgentRole(ownerUri: string, role: string): Promise<void> {
-  await dropAgentRole(ownerUri, role).catch((e) => {
-    console.error(`Failed to roll back orphaned agent role ${role}:`, e)
-  })
-}
-
 export async function getAgent(ctx: AppContext, id: string, userId: string): Promise<AgentWithGrants> {
   const [row] = await ctx.db.select().from(agents).where(eq(agents.id, id)).limit(1)
   if (row === undefined) {
@@ -294,23 +258,9 @@ export async function getAgent(ctx: AppContext, id: string, userId: string): Pro
 }
 
 export async function deleteAgent(ctx: AppContext, id: string, userId: string): Promise<void> {
-  const { agent, grants } = await getAgent(ctx, id, userId)
-  for (const grant of grants) {
-    if (grant.dbRole === null) {
-      continue
-    }
-    // Each grant's role lives in its resource's database (a project/branch). Best-effort:
-    // still remove the metadata row even if a teardown fails, matching deleteProject.
-    // eslint-disable-next-line no-await-in-loop
-    const ownerUri = await resourceConnectionUri(ctx, grant.resourceType, grant.resourceId).catch(() => null)
-    if (ownerUri !== null) {
-      // eslint-disable-next-line no-await-in-loop
-      await dropAgentRole(ownerUri, grant.dbRole).catch((e) => {
-        console.error(`Failed to drop Postgres role for agent ${agent.id}:`, e)
-      })
-    }
-  }
-  // Cascade removes the agent's grant rows.
+  const { agent } = await getAgent(ctx, id, userId)
+  // Nothing to tear down at the engine: scope roles are shared per database (keyed by scope
+  // set, not agent) and outlive any single agent. Cascade removes the agent's grant + scope rows.
   await ctx.db.delete(agents).where(eq(agents.id, agent.id))
 }
 
@@ -348,10 +298,10 @@ export async function getAgentGrant(
  * Merge scopes (each with an optional expiry) into an agent's grant for a resource — a
  * **pure metadata write**, no Postgres role touched. The grant row is upserted if absent
  * and each scope is upserted into `agent_grant_scopes`, keeping the *later* expiry when a
- * scope is granted again (a `null`/permanent expiry always wins over a bounded one). The
- * Postgres role is reconciled lazily at query time by {@link ensureGrantSynced}, so the
- * metadata DB stays the single source of truth and approval can never half-fail across two
- * systems.
+ * scope is granted again (a `null`/permanent expiry always wins over a bounded one). No
+ * Postgres role is touched: queries select a shared scoped connection by scope set at query
+ * time ({@link connectionForScopes}), so the metadata DB stays the single source of truth and
+ * approval can never half-fail across two systems.
  */
 export async function grantScopes(
   ctx: AppContext,
@@ -396,66 +346,57 @@ export async function grantScopes(
 }
 
 /**
- * Reconcile the grant's Postgres role to match its current *effective* scopes, then return
- * the connection to run the query over. This is the reconcile-on-read step: the metadata DB
- * is authoritative, the role is a cache refreshed before use.
+ * The connection an agent's query should run over, given its current *effective* scopes on a
+ * project's database. Enforcement is by scope set, not by agent: this resolves (lazily
+ * provisioning on first use) the shared scoped role for that set and returns its connection.
  *
- * Fast path: if the role exists and its `syncedScopes` snapshot already equals the effective
- * set, no role DDL happens at all — the common case. Slow path: lazily create the role on the
- * resource's database the first time (serialized with a row lock so concurrent first-queries
- * don't double-create), `GRANT`/`REVOKE` group memberships to match, and persist the snapshot.
- * A scope that just lapsed is dropped from `effective` here, so the next query revokes it.
+ * Returns `null` when there's nothing to run as — no database scopes in the set (`scopeKey`
+ * `'0'`), or the project has no connection yet. Fast path: a cached `project_db_roles` row for
+ * the scope set returns immediately. Slow path: under a row lock on the project (so concurrent
+ * first-uses of the same set don't double-provision), re-check, then {@link ensureScopeRole}
+ * and cache the row. The role itself is idempotent, so this is safe to retry.
  */
-export async function ensureGrantSynced(
+export async function connectionForScopes(
   ctx: AppContext,
-  grant: GrantWithScopes,
-  ownerUri: string | null,
-  now: Date = new Date(),
-): Promise<{ connectionUri: string | null; effective: AgentScope[] }> {
-  const effective = effectiveScopes(grant.scopes, now)
-  // Org-level grants have no database of their own — nothing to provision or sync.
-  if (ownerUri === null) {
-    return { connectionUri: null, effective }
+  project: Project,
+  scopes: readonly AgentScope[],
+): Promise<string | null> {
+  const key = scopeSetKey(scopes)
+  const ownerUri = project.connectionUri
+  if (key === '0' || ownerUri === null) {
+    return null
   }
-  // Fast path: role provisioned and snapshot already matches → skip all role DDL.
-  if (grant.dbRole !== null && grant.connectionUri !== null && sameScopeSet(grant.syncedScopes, effective)) {
-    return { connectionUri: grant.connectionUri, effective }
-  }
-
-  // First query on this resource: create the role under a row lock so two concurrent
-  // first-queries can't each create one (and orphan a role). The lock serializes the
-  // create+sync; a loser sees the winner's `dbRole` and reuses it.
-  if (grant.dbRole === null || grant.connectionUri === null) {
-    return ctx.db.transaction(async (tx) => {
-      const [locked] = await tx.select().from(agentGrants).where(eq(agentGrants.id, grant.id)).for('update')
-      let dbRole = locked?.dbRole ?? null
-      let connectionUri = locked?.connectionUri ?? null
-      let createdRole: string | null = null
-      if (dbRole === null || connectionUri === null) {
-        const role = await createAgentRole(ownerUri)
-        dbRole = role.role
-        connectionUri = role.connectionUri
-        createdRole = role.role
-      }
-      try {
-        await syncAgentScopes(ownerUri, dbRole, effective)
-        await tx
-          .update(agentGrants)
-          .set({ dbRole, connectionUri, syncedScopes: effective })
-          .where(eq(agentGrants.id, grant.id))
-      } catch (err) {
-        if (createdRole !== null) {
-          await rollbackAgentRole(ownerUri, createdRole)
-        }
-        throw err
-      }
-      return { connectionUri, effective }
-    })
+  const [existing] = await ctx.db
+    .select({ connectionUri: projectDbRoles.connectionUri })
+    .from(projectDbRoles)
+    .where(and(eq(projectDbRoles.projectId, project.id), eq(projectDbRoles.scopeKey, key)))
+    .limit(1)
+  if (existing !== undefined) {
+    return existing.connectionUri
   }
 
-  // Role exists but its memberships drifted from effective (a scope was granted or expired).
-  // GRANT/REVOKE is idempotent, so concurrent reconciles to the same set are harmless.
-  await syncAgentScopes(ownerUri, grant.dbRole, effective)
-  await ctx.db.update(agentGrants).set({ syncedScopes: effective }).where(eq(agentGrants.id, grant.id))
-  return { connectionUri: grant.connectionUri, effective }
+  return ctx.db.transaction(async (tx) => {
+    // Lock the project row so two concurrent first-uses of this scope set serialize; the loser
+    // sees the winner's cached row on re-check rather than provisioning a second time.
+    await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).for('update')
+    const [again] = await tx
+      .select({ connectionUri: projectDbRoles.connectionUri })
+      .from(projectDbRoles)
+      .where(and(eq(projectDbRoles.projectId, project.id), eq(projectDbRoles.scopeKey, key)))
+      .limit(1)
+    if (again !== undefined) {
+      return again.connectionUri
+    }
+    const { role, connectionUri } = await ensureScopeRole(ownerUri, scopes)
+    await tx
+      .insert(projectDbRoles)
+      .values({ projectId: project.id, scopeKey: key, dbRole: role, connectionUri })
+      .onConflictDoNothing({ target: [projectDbRoles.projectId, projectDbRoles.scopeKey] })
+    const [stored] = await tx
+      .select({ connectionUri: projectDbRoles.connectionUri })
+      .from(projectDbRoles)
+      .where(and(eq(projectDbRoles.projectId, project.id), eq(projectDbRoles.scopeKey, key)))
+      .limit(1)
+    return stored?.connectionUri ?? connectionUri
+  })
 }

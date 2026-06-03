@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { runSql, SYSTEM_USER_ID } from '@walnut/core'
-import { agentGrants, agentGrantScopes, branches, organizationMembers, organizations } from '@walnut/db'
+import { runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
+import {
+  agentGrants,
+  agentGrantScopes,
+  branches,
+  organizationMembers,
+  organizations,
+  projectDbRoles,
+} from '@walnut/db'
 import { and, eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
 import { createApp } from '../src/app.ts'
@@ -145,31 +152,32 @@ describe('agents', () => {
     expect(grants.length).toBe(0)
   })
 
-  test('approving a scope request is a pure metadata write; the role is provisioned lazily on first query', async () => {
+  test('approving a scope request is a pure metadata write; the scoped role is provisioned lazily on first query', async () => {
     const project = await newProject()
     const agent = await newAgent()
     await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
 
-    // Approval writes the grant + scope rows but touches no Postgres role yet.
+    // Approval writes the grant + scope rows (pure policy) and provisions no Postgres role.
     const grants = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
     expect(grants.length).toBe(1)
     const g = grants[0]
     expect(g?.resourceType).toBe('project')
     expect(g?.resourceId).toBe(project.id)
-    expect(g?.dbRole).toBeNull()
-    expect(g?.connectionUri).toBeNull()
-    expect(g?.syncedScopes).toBeNull()
     const scopeRows = await h.ctx.db.select().from(agentGrantScopes).where(eq(agentGrantScopes.grantId, g?.id ?? ''))
     expect(scopeRows.map((r) => r.scope).toSorted()).toEqual(['db:read', 'db:write'])
     expect(scopeRows.every((r) => r.expiresAt === null)).toBe(true)
+    // No shared scope role exists yet for this project — it's provisioned on first use.
+    const before = await h.ctx.db.select().from(projectDbRoles).where(eq(projectDbRoles.projectId, project.id))
+    expect(before.length).toBe(0)
 
-    // The first query provisions the role lazily and records the synced snapshot.
+    // The first query provisions the shared scope role for the {read,write} set and caches it.
     const ran = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: bearer(agent.apiKey) })
     expect(ran.status).toBe(200)
-    const [after] = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.id, g?.id ?? ''))
-    expect(typeof after?.dbRole).toBe('string')
-    expect(after?.connectionUri ?? '').toContain('postgres')
-    expect(after?.syncedScopes).toEqual(['db:read', 'db:write'])
+    const after = await h.ctx.db.select().from(projectDbRoles).where(eq(projectDbRoles.projectId, project.id))
+    expect(after.length).toBe(1)
+    expect(after[0]?.scopeKey).toBe(scopeSetKey(['db:read', 'db:write']))
+    expect(after[0]?.connectionUri ?? '').toContain('postgres')
+    expect(after[0]?.dbRole ?? '').toContain('_s')
   }, 20_000)
 })
 
@@ -436,11 +444,11 @@ describe('scope expiry', () => {
     expect(readScope?.expiresAt).not.toBeNull()
   }, 20_000)
 
-  test('an expired scope is denied at the classifier and revoked from the role on the next valid query', async () => {
+  test('an expired scope is denied at the classifier; a still-valid scope keeps working', async () => {
     const project = await newProject()
     const agent = await newAgent()
     const auth = bearer(agent.apiKey)
-    // Permanent read + a time-boxed write; a first query provisions the scoped role.
+    // Permanent read + a time-boxed write; a first query provisions the {read,write} scope role.
     await grant(agent.apiKey, project.id, ['db:read'])
     await grantWithTtl(agent.apiKey, project.id, ['db:write'], 3600)
     const seed = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: auth })
@@ -458,47 +466,33 @@ describe('scope expiry', () => {
     expect(blocked.status).toBe(403)
     expect((blocked.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['db:write'])
 
-    // A still-valid read reconciles the role: the expired write membership is revoked,
-    // leaving the synced snapshot at just db:read.
+    // A still-valid read works — it now runs over the lesser {read} scoped connection.
     const read = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: auth })
     expect(read.status).toBe(200)
-    const [g] = await h.ctx.db
-      .select()
-      .from(agentGrants)
-      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
-    expect(g?.syncedScopes).toEqual(['db:read'])
 
     // The agent's identity also reflects only the live scope.
     const identity = await h.api.agent.v1.identity.get({ headers: auth })
     expect(identity.data?.scopes).toEqual(['db:read'])
   }, 25_000)
 
-  test('when every scope lapses, even a denied query revokes the stale role memberships', async () => {
+  test('when every scope lapses, queries are denied and the agent has no effective scopes', async () => {
     const project = await newProject()
     const agent = await newAgent()
     const auth = bearer(agent.apiKey)
-    // A single time-boxed scope, provisioned onto the role by an authorised query.
+    // A single time-boxed scope, exercised by an authorised query.
     await grantWithTtl(agent.apiKey, project.id, ['db:read'], 3600)
     const seed = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: auth })
     expect(seed.status).toBe(200)
-    const [before] = await h.ctx.db
-      .select()
-      .from(agentGrants)
-      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
-    expect(before?.syncedScopes).toEqual(['db:read'])
 
     // The scope lapses, leaving the grant with zero effective scopes.
     await expireScope(agent.id, project.id, 'db:read')
 
-    // The next query is denied (nothing is in force) — but the engine cache must not be left
-    // stale: the reconcile on the denied path revokes the lapsed db:read membership.
+    // The next query is denied (nothing is in force); identity reports no live scopes. There is
+    // no per-agent role to leave stale — enforcement just stops selecting a scoped connection.
     const blocked = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: auth })
     expect(blocked.status).toBe(403)
-    const [after] = await h.ctx.db
-      .select()
-      .from(agentGrants)
-      .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.resourceId, project.id)))
-    expect(after?.syncedScopes).toEqual([])
+    const identity = await h.api.agent.v1.identity.get({ headers: auth })
+    expect(identity.data?.scopes).toEqual([])
   }, 20_000)
 
   test('re-requesting a scope extends its expiry (the later deadline wins)', async () => {

@@ -1,20 +1,20 @@
 import { randomBytes } from 'node:crypto'
 import postgres from 'postgres'
-import { type AgentScope, DB_SCOPES, type DbScope } from './scopes.ts'
+import { type AgentScope, DB_SCOPES, type DbScope, scopeMask } from './scopes.ts'
 
 /**
- * Per-agent Postgres roles — the real enforcement boundary.
+ * Per-database Postgres roles — the real enforcement boundary.
  *
- * Each project database gets four `NOLOGIN` group roles (one per scope). Each
- * agent gets its own `LOGIN` role that is a *member* of the group roles matching
- * its granted scopes, so approval/denial is just `GRANT`/`REVOKE` of membership.
- * Agent queries run over the agent's restricted connection — never the project
- * owner connection — so even a query the SQL classifier mis-reads is still
- * refused by the database engine.
+ * Each database gets four `NOLOGIN` group roles (one per scope). Enforcement is keyed by
+ * *scope set*, not by agent: for each combination of scopes actually in use we provision one
+ * shared `LOGIN` "scope role" that is a member of exactly those group roles (≤ 2⁴ = 16 per
+ * database). An agent's query runs over the scope role matching its current effective scopes,
+ * so the database engine refuses anything ungranted even if the SQL classifier mis-reads — and
+ * a scope change is just "pick a different connection" with no per-agent role to reconcile.
  *
- * All DDL here runs over the project *owner* connection (the connection string we
- * already store on the project). That connection is platform-only from now on and
- * is never handed to an agent.
+ * All DDL here runs over the database *owner* connection (the connection string we already
+ * store). That connection is platform-only and is never handed to an agent; scope roles carry
+ * their own generated credentials.
  */
 
 const SCOPE_SUFFIX: Record<DbScope, string> = {
@@ -46,9 +46,10 @@ function groupRole(prefix: string, scope: DbScope): string {
   return `${prefix}_${SCOPE_SUFFIX[scope]}`
 }
 
-/** Name of an agent's login role, derived from the DB prefix + a random suffix. */
-function newAgentRoleName(prefix: string): string {
-  return `${prefix}_a_${randomBytes(8).toString('hex')}`
+/** Name of the shared scope role for a scope set, derived from the DB prefix + the scope mask
+ * (e.g. `proj_ab12_s11` for read+write+ddl). Deterministic, so provisioning is idempotent. */
+function scopeRoleName(prefix: string, scopes: readonly AgentScope[]): string {
+  return `${prefix}_s${scopeMask(scopes)}`
 }
 
 function buildAgentUri(ownerUri: string, role: string, password: string): string {
@@ -140,36 +141,52 @@ END $$;`
   await withAdmin(ownerUri, (admin) => admin.unsafe(sql))
 }
 
-export interface AgentRole {
-  /** The agent's Postgres role name. */
+export interface ScopeRole {
+  /** The shared Postgres role for this scope set. */
   role: string
   /** Connection string scoped to that role (carries its generated password). */
   connectionUri: string
 }
 
 /**
- * Create an agent's login role with zero scope memberships (matching the
- * zero-scopes-at-birth model), a `statement_timeout`, and default privileges so
- * any tables the agent later creates are reachable by the other group roles.
+ * Idempotently provision the shared login role for one scope set on a database, returning a
+ * connection scoped to it. The role is a member of exactly the group roles matching `scopes`,
+ * has a `statement_timeout`, and default privileges so tables it creates (when the set includes
+ * `db:ddl`) stay reachable by the per-scope group roles — so a read-only scope role can read
+ * what a ddl scope role made.
+ *
+ * The role name is deterministic (DB prefix + scope mask), so calling this twice is safe; the
+ * password is (re)set each call to match the returned connection, which self-heals a role left
+ * behind by a crashed provision. Callers gate creation in the metadata DB (one row per
+ * `(database, scopeKey)`) so this normally runs once per scope set per database.
  */
-export async function createAgentRole(ownerUri: string): Promise<AgentRole> {
+export async function ensureScopeRole(ownerUri: string, scopes: readonly AgentScope[]): Promise<ScopeRole> {
   const prefix = dbName(ownerUri)
-  const role = newAgentRoleName(prefix)
+  const role = scopeRoleName(prefix, scopes)
   const password = randomBytes(24).toString('hex')
   const read = groupRole(prefix, 'db:read')
   const write = groupRole(prefix, 'db:write')
   const del = groupRole(prefix, 'db:delete')
+  const held = new Set<string>(scopes)
+  const membership = DB_SCOPES.map((scope) => {
+    const group = ident(groupRole(prefix, scope))
+    return held.has(scope)
+      ? `GRANT ${group} TO ${ident(role)};`
+      : `REVOKE ${group} FROM ${ident(role)};`
+  })
 
   const sql = [
     `DO $$ BEGIN CREATE ROLE ${ident(role)} LOGIN PASSWORD '${password}'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    // Self-heal a pre-existing role: match its password to the connection we hand back.
+    `ALTER ROLE ${ident(role)} WITH LOGIN PASSWORD '${password}';`,
     `GRANT CONNECT ON DATABASE ${ident(prefix)} TO ${ident(role)};`,
     `ALTER ROLE ${ident(role)} SET statement_timeout = '15s';`,
-    // `ALTER DEFAULT PRIVILEGES FOR ROLE <agent>` requires the executor to hold the
-    // SET option on that role. A superuser owner (local) has it implicitly, but a
-    // non-superuser owner (Neon) does not — so grant it explicitly first, or every
-    // agent creation 500s in production.
+    // `ALTER DEFAULT PRIVILEGES FOR ROLE <role>` requires the executor to hold the SET option
+    // on that role. A superuser owner (local) has it implicitly, but a non-superuser owner
+    // (Neon) does not — so grant it explicitly first, or provisioning 500s in production.
     `GRANT ${ident(role)} TO CURRENT_USER WITH SET TRUE;`,
-    // Tables this agent creates become reachable by the group roles per scope.
+    ...membership,
+    // Tables this scope role creates become reachable by the group roles per scope.
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${ident(role)} IN SCHEMA public GRANT SELECT ON TABLES TO ${ident(read)};`,
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${ident(role)} IN SCHEMA public GRANT INSERT, UPDATE ON TABLES TO ${ident(write)};`,
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${ident(role)} IN SCHEMA public GRANT USAGE ON SEQUENCES TO ${ident(write)};`,
@@ -178,38 +195,6 @@ export async function createAgentRole(ownerUri: string): Promise<AgentRole> {
 
   await withAdmin(ownerUri, (admin) => admin.unsafe(sql))
   return { role, connectionUri: buildAgentUri(ownerUri, role, password) }
-}
-
-/** Make an agent's group memberships exactly match the DB scopes in `scopes`
- * (GRANT/REVOKE the diff). Non-DB scopes have no group role and are ignored. */
-export async function syncAgentScopes(
-  ownerUri: string,
-  agentRole: string,
-  scopes: readonly AgentScope[],
-): Promise<void> {
-  const prefix = dbName(ownerUri)
-  const held = new Set<string>(scopes)
-  const stmts = DB_SCOPES.map((scope) => {
-    const group = ident(groupRole(prefix, scope))
-    return held.has(scope)
-      ? `GRANT ${group} TO ${ident(agentRole)};`
-      : `REVOKE ${group} FROM ${ident(agentRole)};`
-  })
-  await withAdmin(ownerUri, (admin) => admin.unsafe(stmts.join('\n')))
-}
-
-/** Drop an agent's login role, transferring any tables it created back to the owner. */
-export async function dropAgentRole(ownerUri: string, agentRole: string): Promise<void> {
-  await withAdmin(ownerUri, async (admin) => {
-    const exists = await admin`SELECT 1 FROM pg_roles WHERE rolname = ${agentRole}`
-    if (exists.length === 0) {
-      return
-    }
-    const r = ident(agentRole)
-    await admin.unsafe(`REASSIGN OWNED BY ${r} TO CURRENT_USER`)
-    await admin.unsafe(`DROP OWNED BY ${r}`)
-    await admin.unsafe(`DROP ROLE IF EXISTS ${r}`)
-  })
 }
 
 /**

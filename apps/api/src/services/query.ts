@@ -5,13 +5,12 @@ import {
   missingScopes,
   type QueryResult,
   runSql,
-  sameScopeSet,
   SCOPE_DESCRIPTIONS,
 } from '@walnut/core'
 import type { Project } from '@walnut/db'
 import type { AppContext } from '../context.ts'
 import { HttpError } from '../errors.ts'
-import { ensureGrantSynced, type GrantWithScopes } from './agents.ts'
+import { connectionForScopes, type GrantWithScopes } from './agents.ts'
 
 export interface AgentQueryResult extends QueryResult {
   requiredScopes: string[]
@@ -23,12 +22,12 @@ export interface AgentQueryResult extends QueryResult {
  * exactly what it lacks and how to ask for it — the heart of the agent-first
  * contract.
  *
- * Scopes come from the metadata DB (the source of truth), expiry-filtered to those still
- * in force. The agent's Postgres role is reconciled to those effective scopes
- * ({@link ensureGrantSynced}) and the query runs over its restricted connection — never the
- * project owner connection — so the engine backs up the classifier (defense in depth). The
- * reconcile also runs on the *denied* path whenever a provisioned role's memberships have
- * drifted (e.g. a scope lapsed), so engine revocation never trails the source of truth.
+ * Scopes come from the metadata DB (the source of truth), expiry-filtered to those still in
+ * force. The query then runs over the database's *shared* scoped connection for that exact
+ * scope set ({@link connectionForScopes}) — never the project owner connection — so the engine
+ * backs up the classifier (defense in depth). When a scope lapses, the agent's effective set
+ * simply collapses to a smaller one and a different (lesser) connection is selected; there is
+ * no per-agent role to revoke, so engine access can never trail the source of truth.
  */
 export async function runAgentQuery(
   ctx: AppContext,
@@ -52,13 +51,6 @@ export async function runAgentQuery(
   const granted = grant === null ? [] : effectiveScopes(grant.scopes, now)
   const missing = missingScopes(granted, classification.requiredScopes)
   if (missing.length > 0) {
-    // Denied — but if a provisioned role still carries memberships that have since lapsed,
-    // revoke them now rather than deferring to the next authorised query. Bounded: this only
-    // does role DDL when the synced snapshot has actually drifted (e.g. a scope just
-    // expired), after which the snapshot matches and repeat denials are a no-op.
-    if (grant !== null && grant.dbRole !== null && !sameScopeSet(grant.syncedScopes, granted)) {
-      await ensureGrantSynced(ctx, grant, project.connectionUri, now)
-    }
     throw new HttpError(403, {
       error: 'insufficient_scope',
       message:
@@ -73,16 +65,12 @@ export async function runAgentQuery(
     })
   }
 
-  // Authorised by the metadata DB. `grant` is necessarily non-null here (an empty grant
-  // yields no effective scopes, which can't satisfy a real statement's required scopes).
-  // Reconcile the engine to the effective scopes (provisioning the role lazily on first use).
-  if (grant === null) {
-    throw new HttpError(500, { error: 'internal_error', message: 'Authorised query unexpectedly has no grant.' })
-  }
-  const { connectionUri } = await ensureGrantSynced(ctx, grant, project.connectionUri, now)
+  // Authorised by the metadata DB. Run over the shared scoped connection for the effective
+  // scope set, provisioning that role lazily on first use.
+  const connectionUri = await connectionForScopes(ctx, project, granted)
   if (connectionUri === null) {
     // Fail closed: a scoped query must never fall back to the owner (superuser) connection.
-    throw new HttpError(500, { error: 'internal_error', message: 'No scoped connection provisioned for grant.' })
+    throw new HttpError(500, { error: 'internal_error', message: 'No scoped connection provisioned for query.' })
   }
 
   let result: QueryResult

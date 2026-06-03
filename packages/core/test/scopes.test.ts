@@ -7,7 +7,8 @@ import {
   missingScopes,
   parseScopes,
   parseScopesForResource,
-  sameScopeSet,
+  scopeMask,
+  scopeSetKey,
   SCOPES_BY_RESOURCE,
 } from '../src/scopes.ts'
 
@@ -69,11 +70,24 @@ describe('scope expiry', () => {
     expect(effectiveScopes([{ scope: 'db:read', expiresAt: now }], now)).toEqual([])
   })
 
-  test('sameScopeSet compares canonical lists; null snapshot never matches', () => {
-    expect(sameScopeSet(['db:read', 'db:write'], ['db:read', 'db:write'])).toBe(true)
-    expect(sameScopeSet(['db:read'], ['db:read', 'db:write'])).toBe(false)
-    expect(sameScopeSet(null, [])).toBe(false)
-    expect(sameScopeSet([], [])).toBe(true)
+  test('scopeMask is the canonical bitmask of the db scopes (order/dup independent)', () => {
+    expect(scopeMask([])).toBe(0)
+    expect(scopeMask(['db:read'])).toBe(1)
+    expect(scopeMask(['db:write'])).toBe(2)
+    expect(scopeMask(['db:delete'])).toBe(4)
+    expect(scopeMask(['db:ddl'])).toBe(8)
+    expect(scopeMask(['db:read', 'db:write', 'db:delete', 'db:ddl'])).toBe(15)
+    // Order and duplicates don't change the mask — the whole point of a canonical key.
+    expect(scopeMask(['db:write', 'db:read'])).toBe(scopeMask(['db:read', 'db:write', 'db:read']))
+  })
+
+  test('scopeSetKey maps a scope set to a stable string; empty set is "0"', () => {
+    expect(scopeSetKey([])).toBe('0')
+    expect(scopeSetKey(['db:read'])).toBe('1')
+    expect(scopeSetKey(['db:read', 'db:write'])).toBe('3')
+    // Distinct sets never collide; equal sets (any order) share a key.
+    expect(scopeSetKey(['db:read', 'db:ddl'])).toBe(scopeSetKey(['db:ddl', 'db:read']))
+    expect(scopeSetKey(['db:read'])).not.toBe(scopeSetKey(['db:write']))
   })
 })
 
