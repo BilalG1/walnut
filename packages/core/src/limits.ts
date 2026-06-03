@@ -19,6 +19,12 @@
  * The **organization** is the anchor — today one org maps to one user (orgs are
  * JIT personal orgs, one per user), so a per-org cap is also a per-user cap. If
  * multi-org creation is ever added, these will need a per-user backstop above them.
+ *
+ * The check is count-then-insert (no surrounding transaction), so two simultaneous
+ * creates at the ceiling can overshoot by the concurrency — a deliberate, bounded
+ * best-effort, matching the codebase's existing posture (e.g. the branch-name pre-check
+ * backed only by a unique constraint). The point is to stop runaway loops, not to be a
+ * hard transactional quota.
  */
 export const RESOURCE_LIMITS = {
   /** Neon projects per org. Each is a whole Neon project container, and Neon accounts

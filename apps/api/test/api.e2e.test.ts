@@ -1,13 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
+import { RESOURCE_LIMITS, runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
 import {
+  agents,
   agentGrants,
   agentGrantScopes,
   branchDbRoles,
   branches,
   organizationMembers,
   organizations,
+  projects,
+  scopeRequests,
 } from '@walnut/db'
 import { and, eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
@@ -22,6 +25,8 @@ interface ErrorBody {
   missingScopes?: string[]
   requiredScopes?: string[]
   grantedScopes?: string[]
+  limit?: string
+  max?: number
 }
 
 let h: Harness
@@ -1713,4 +1718,118 @@ describe('agent grant revocation', () => {
     expect(miss.status).toBe(404)
     expect((await grantsOf(agent.id))[0]?.scopes.map((s) => s.scope)).toEqual(['db:read'])
   }, 20_000)
+})
+
+describe('resource limits', () => {
+  // Each cap is checked with a COUNT *before* any provider call, so we seed the metadata
+  // rows directly to reach the ceiling cheaply (no real provisioning) and assert the API
+  // refuses the over-the-limit create with a machine-readable 403 `limit_exceeded` body.
+
+  test('projects per org is capped', async () => {
+    const orgId = await personalOrgId()
+    await h.ctx.db.insert(projects).values(
+      Array.from({ length: RESOURCE_LIMITS.projectsPerOrg }, (_, i) => ({
+        organizationId: orgId,
+        name: `seed-${i}`,
+        provider: 'local' as const,
+        status: 'active' as const,
+      })),
+    )
+    const res = await h.api.api.projects.post({ name: 'one-too-many' })
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('limit_exceeded')
+    expect(body?.limit).toBe('projects_per_org')
+    expect(body?.max).toBe(RESOURCE_LIMITS.projectsPerOrg)
+  })
+
+  test('branches per project is capped', async () => {
+    const project = await newProject() // a real project; its main branch counts as 1
+    await h.ctx.db.insert(branches).values(
+      Array.from({ length: RESOURCE_LIMITS.branchesPerProject - 1 }, (_, i) => ({
+        projectId: project.id,
+        name: `seed-${i}`,
+        isDefault: false,
+        status: 'active' as const,
+      })),
+    )
+    const res = await h.api.api.projects({ id: project.id }).branches.post({ name: 'overflow' })
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('limit_exceeded')
+    expect(body?.limit).toBe('branches_per_project')
+  })
+
+  test('branches per org is capped across projects', async () => {
+    const orgId = await personalOrgId()
+    // Spread branches so no single project hits the per-project cap, but the org total does.
+    const perProject = RESOURCE_LIMITS.branchesPerProject - 1
+    const projCount = Math.ceil(RESOURCE_LIMITS.branchesPerOrg / perProject)
+    const created = await h.ctx.db
+      .insert(projects)
+      .values(
+        Array.from({ length: projCount }, (_, i) => ({
+          organizationId: orgId,
+          name: `p-${i}`,
+          provider: 'local' as const,
+          status: 'active' as const,
+        })),
+      )
+      .returning({ id: projects.id })
+    let remaining = RESOURCE_LIMITS.branchesPerOrg
+    const branchRows: { projectId: string; name: string; isDefault: boolean; status: 'active' }[] = []
+    for (const p of created) {
+      const take = Math.min(perProject, remaining)
+      for (let i = 0; i < take; i++) {
+        branchRows.push({ projectId: p.id, name: `b-${p.id}-${i}`, isDefault: false, status: 'active' })
+      }
+      remaining -= take
+    }
+    await h.ctx.db.insert(branches).values(branchRows)
+    // created[0] holds `perProject` (< the per-project cap) branches, so only the org cap trips.
+    const target = created[0]
+    if (target === undefined) throw new Error('no seeded project')
+    const res = await h.api.api.projects({ id: target.id }).branches.post({ name: 'overflow' })
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('limit_exceeded')
+    expect(body?.limit).toBe('branches_per_org')
+  })
+
+  test('agents per org is capped', async () => {
+    const orgId = await personalOrgId()
+    await h.ctx.db.insert(agents).values(
+      Array.from({ length: RESOURCE_LIMITS.agentsPerOrg }, (_, i) => ({
+        organizationId: orgId,
+        name: `seed-${i}`,
+        keyHash: `seed-hash-${i}`,
+        keyPrefix: 'wln_agt_seed',
+      })),
+    )
+    const res = await h.api.api.organizations({ orgId }).agents.post({ name: 'one-too-many' })
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('limit_exceeded')
+    expect(body?.limit).toBe('agents_per_org')
+  })
+
+  test('pending scope requests per agent is capped', async () => {
+    const orgId = await personalOrgId()
+    const agent = await newAgent()
+    await h.ctx.db.insert(scopeRequests).values(
+      Array.from({ length: RESOURCE_LIMITS.pendingScopeRequestsPerAgent }, () => ({
+        agentId: agent.id,
+        organizationId: orgId,
+        resourceType: 'project' as const,
+        resourceId: crypto.randomUUID(),
+        scopes: ['db:read' as const],
+        status: 'pending' as const,
+      })),
+    )
+    const res = await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('limit_exceeded')
+    expect(body?.limit).toBe('pending_scope_requests_per_agent')
+  })
 })

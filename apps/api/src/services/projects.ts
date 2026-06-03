@@ -1,8 +1,8 @@
-import { type ProvisionedDatabase, type ProvisionedProject, setupProjectRoles } from '@walnut/core'
+import { type ProvisionedDatabase, type ProvisionedProject, RESOURCE_LIMITS, setupProjectRoles } from '@walnut/core'
 import { agentGrants, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
 import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { badRequest, HttpError, notFound } from '../errors.ts'
+import { badRequest, HttpError, limitExceeded, notFound } from '../errors.ts'
 import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
 
 /** A user's projects: those in any organization they're a member of. */
@@ -169,6 +169,18 @@ export async function createProject(
     await assertOrgMember(ctx, orgId, userId)
     organizationId = orgId
   }
+  // Cap projects per org before provisioning: each project is a whole Neon project
+  // container, and the shared Neon account caps total projects.
+  const [{ n: projectCount } = { n: 0 }] = await ctx.db
+    .select({ n: count() })
+    .from(projects)
+    .where(eq(projects.organizationId, organizationId))
+  if (projectCount >= RESOURCE_LIMITS.projectsPerOrg) {
+    throw limitExceeded(
+      `This organization has reached its limit of ${RESOURCE_LIMITS.projectsPerOrg} projects.`,
+      { limit: 'projects_per_org', max: RESOURCE_LIMITS.projectsPerOrg, scope: 'org' },
+    )
+  }
   const [created] = await ctx.db
     .insert(projects)
     .values({
@@ -328,6 +340,30 @@ export async function createBranch(
   const project = await getProject(ctx, projectId, userId)
   if (!BRANCH_NAME_RE.test(input.name)) {
     throw badRequest('Invalid branch name. Use letters, digits, and ._/- (max 64 chars).')
+  }
+  // Cap branches before provisioning: each branch is a Neon compute endpoint — the
+  // headline cost surface. Two ceilings: per-project, plus a per-org backstop so
+  // many-projects × few-branches can't slip past it.
+  const [{ n: branchCount } = { n: 0 }] = await ctx.db
+    .select({ n: count() })
+    .from(branches)
+    .where(eq(branches.projectId, projectId))
+  if (branchCount >= RESOURCE_LIMITS.branchesPerProject) {
+    throw limitExceeded(
+      `This project has reached its limit of ${RESOURCE_LIMITS.branchesPerProject} branches.`,
+      { limit: 'branches_per_project', max: RESOURCE_LIMITS.branchesPerProject, scope: 'project' },
+    )
+  }
+  const [{ n: orgBranchCount } = { n: 0 }] = await ctx.db
+    .select({ n: count() })
+    .from(branches)
+    .innerJoin(projects, eq(branches.projectId, projects.id))
+    .where(eq(projects.organizationId, project.organizationId))
+  if (orgBranchCount >= RESOURCE_LIMITS.branchesPerOrg) {
+    throw limitExceeded(
+      `This organization has reached its limit of ${RESOURCE_LIMITS.branchesPerOrg} branches.`,
+      { limit: 'branches_per_org', max: RESOURCE_LIMITS.branchesPerOrg, scope: 'org' },
+    )
   }
   const source = await resolveBranch(ctx, projectId, input.from)
   if (source.status !== 'active' || source.connectionUri === null || source.providerBranchId === null) {

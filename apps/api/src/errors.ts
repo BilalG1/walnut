@@ -1,3 +1,5 @@
+import type { LimitExceededInfo } from '@walnut/core'
+
 export interface HttpErrorBody {
   error: string
   message: string
@@ -27,4 +29,12 @@ export function unauthorized(message: string): HttpError {
 
 export function badRequest(message: string): HttpError {
   return new HttpError(400, { error: 'bad_request', message })
+}
+
+/** A resource cap was hit (e.g. too many branches for a project). 403 with a
+ * machine-readable {@link LimitExceededInfo} body (`limit`/`max`/`scope`) so an agent or
+ * the dashboard can explain exactly which ceiling was reached. Distinct from a 429 rate
+ * limit: this is "you hold too many", not "you're going too fast". */
+export function limitExceeded(message: string, info: LimitExceededInfo): HttpError {
+  return new HttpError(403, { error: 'limit_exceeded', message, ...info })
 }

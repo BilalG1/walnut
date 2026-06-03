@@ -1,4 +1,4 @@
-import { type AgentScope, type GrantResourceType, parseScopesForResource } from '@walnut/core'
+import { type AgentScope, type GrantResourceType, parseScopesForResource, RESOURCE_LIMITS } from '@walnut/core'
 import {
   branches,
   organizationMembers,
@@ -7,9 +7,9 @@ import {
   type ScopeRequest,
   type ScopeRequestStatus,
 } from '@walnut/db'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, count, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { badRequest, HttpError, notFound } from '../errors.ts'
+import { badRequest, HttpError, limitExceeded, notFound } from '../errors.ts'
 import { grantScopes, resolveAgentProject } from './agents.ts'
 import { assertOrgMember } from './organizations.ts'
 import { getProjectInternal } from './projects.ts'
@@ -110,6 +110,18 @@ export interface ScopeRequestInput {
 }
 
 export async function createScopeRequest(ctx: AppContext, agent: Agent, input: ScopeRequestInput): Promise<ScopeRequest> {
+  // Cap outstanding (pending) requests per agent so a flood can't spam the dashboard
+  // with notifications or grow metadata unbounded. Resolved requests don't count.
+  const [{ n: pendingCount } = { n: 0 }] = await ctx.db
+    .select({ n: count() })
+    .from(scopeRequests)
+    .where(and(eq(scopeRequests.agentId, agent.id), eq(scopeRequests.status, 'pending')))
+  if (pendingCount >= RESOURCE_LIMITS.pendingScopeRequestsPerAgent) {
+    throw limitExceeded(
+      `This agent has reached its limit of ${RESOURCE_LIMITS.pendingScopeRequestsPerAgent} pending scope requests. Wait for some to be approved or denied.`,
+      { limit: 'pending_scope_requests_per_agent', max: RESOURCE_LIMITS.pendingScopeRequestsPerAgent, scope: 'agent' },
+    )
+  }
   let resourceType: GrantResourceType
   let resourceId: string
   if (input.resourceType !== undefined || input.resourceId !== undefined) {

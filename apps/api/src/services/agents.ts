@@ -6,6 +6,7 @@ import {
   isAgentScope,
   keyPrefix,
   newAgentKey,
+  RESOURCE_LIMITS,
   scopeSetKey,
   type ScopeWithExpiry,
 } from '@walnut/core'
@@ -22,9 +23,9 @@ import {
   type GrantResourceType,
   type Project,
 } from '@walnut/db'
-import { and, desc, eq, inArray, notExists, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, notExists, or, sql } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { HttpError, notFound } from '../errors.ts'
+import { HttpError, limitExceeded, notFound } from '../errors.ts'
 import { assertOrgMember } from './organizations.ts'
 import { getProjectInternal, listProjectsInOrg } from './projects.ts'
 
@@ -231,6 +232,18 @@ export async function createAgent(
   input: { name: string },
 ): Promise<CreatedAgent> {
   await assertOrgMember(ctx, orgId, userId)
+  // Cap agents per org. Cheap (pure metadata) but bounds API-key sprawl.
+  const [{ n: agentCount } = { n: 0 }] = await ctx.db
+    .select({ n: count() })
+    .from(agents)
+    .where(eq(agents.organizationId, orgId))
+  if (agentCount >= RESOURCE_LIMITS.agentsPerOrg) {
+    throw limitExceeded(`This organization has reached its limit of ${RESOURCE_LIMITS.agentsPerOrg} agents.`, {
+      limit: 'agents_per_org',
+      max: RESOURCE_LIMITS.agentsPerOrg,
+      scope: 'org',
+    })
+  }
   // Born with zero grants and zero roles: an agent gets a scoped Postgres role only when
   // its first scope request on a resource is approved (see grantScopes).
   const apiKey = newAgentKey()
