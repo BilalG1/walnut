@@ -1,5 +1,6 @@
 /** Central React Query key factory — one place so invalidation stays consistent. */
 export const keys = {
+  me: () => ['me'] as const,
   orgs: () => ['orgs'] as const,
   orgProjects: (orgId: string) => ['orgs', orgId, 'projects'] as const,
   orgAgents: (orgId: string) => ['orgs', orgId, 'agents'] as const,

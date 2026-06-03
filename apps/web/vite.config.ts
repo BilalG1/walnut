@@ -37,7 +37,7 @@ function installScriptPlugin(): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   // Load env from the repo root so one .env serves api + web. Only VITE_* vars are
   // ever exposed to the client, so backend secrets in the same file stay private.
   // The empty third arg loads ALL vars (not just VITE_*) so we can read the
@@ -52,10 +52,21 @@ export default defineConfig(({ mode }) => {
   const explicitApiUrl = env.VITE_API_URL?.trim()
   const apiUrl = explicitApiUrl || localServiceUrl('api', prefix)
 
+  // The `curl … | sh` installer base shown in onboarding. In dev/preview the site itself
+  // serves `/install` (see installScriptPlugin), so default to this prefix-derived web
+  // origin — making the displayed command actually work locally. A production build injects
+  // nothing and the app falls back to DEFAULT_WALNUT_WEB_URL (set VITE_INSTALL_URL to
+  // override). `command === 'serve'` covers dev + preview; `build` is the production bundle.
+  const explicitInstallUrl = env.VITE_INSTALL_URL?.trim()
+  const installUrl = explicitInstallUrl || (command === 'serve' ? localServiceUrl('web', prefix) : undefined)
+
   return {
     plugins: [react(), tailwindcss(), installScriptPlugin()],
     envDir: '../..',
-    define: explicitApiUrl ? {} : { 'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl) },
+    define: {
+      ...(explicitApiUrl ? {} : { 'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl) }),
+      ...(installUrl === undefined ? {} : { 'import.meta.env.VITE_INSTALL_URL': JSON.stringify(installUrl) }),
+    },
     server: { port: webPort, strictPort: true },
     preview: { port: webPort, strictPort: true },
   }

@@ -125,6 +125,10 @@ export const ArrowLeft = createIcon('ArrowLeft', [
   { tag: 'path', attrs: { d: 'm12 19-7-7 7-7' } },
   { tag: 'path', attrs: { d: 'M19 12H5' } },
 ])
+export const ArrowRight = createIcon('ArrowRight', [
+  { tag: 'path', attrs: { d: 'M5 12h14' } },
+  { tag: 'path', attrs: { d: 'm12 5 7 7-7 7' } },
+])
 export const ExternalLink = createIcon('ExternalLink', [
   { tag: 'path', attrs: { d: 'M15 3h6v6' } },
   { tag: 'path', attrs: { d: 'M10 14 21 3' } },

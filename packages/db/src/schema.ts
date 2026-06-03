@@ -17,6 +17,10 @@ const createdAt = timestamp('created_at', { withTimezone: true }).notNull().defa
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull(),
+  /** When the user finished (or skipped) the first-run onboarding wizard. Null = not yet
+   * done; the dashboard routes such users into the guided get-started flow and hides the
+   * org sidebar until this is set. A timestamp (not a bool) records *when*, by convention. */
+  onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
   createdAt,
 })
 

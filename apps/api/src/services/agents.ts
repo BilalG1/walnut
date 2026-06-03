@@ -250,6 +250,31 @@ export async function createAgent(
   return { agent, grants: [], apiKey }
 }
 
+/**
+ * Mint a fresh API key for an existing agent, invalidating the old one (only the hash is
+ * stored, so a lost key can never be re-shown — it must be rotated). Grants and Postgres
+ * roles are unaffected; the new key authenticates as the same agent. Used by the
+ * onboarding wizard to recover a key after a reload, where the plaintext was never
+ * persisted client-side.
+ */
+export async function rotateAgentKey(
+  ctx: AppContext,
+  agentId: string,
+  userId: string,
+): Promise<CreatedAgent> {
+  const { agent, grants } = await getAgent(ctx, agentId, userId)
+  const apiKey = newAgentKey()
+  const [updated] = await ctx.db
+    .update(agents)
+    .set({ keyHash: hashKey(apiKey), keyPrefix: keyPrefix(apiKey) })
+    .where(eq(agents.id, agent.id))
+    .returning()
+  if (updated === undefined) {
+    throw new HttpError(500, { error: 'internal_error', message: 'Failed to rotate agent key.' })
+  }
+  return { agent: updated, grants, apiKey }
+}
+
 /** Best-effort drop of an agent role during error recovery; logs but never throws. */
 async function rollbackAgentRole(ownerUri: string, role: string): Promise<void> {
   await dropAgentRole(ownerUri, role).catch((e) => {

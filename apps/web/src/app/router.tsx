@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { AppLayout } from '../components/layout/AppLayout.tsx'
 import { keys } from '../data/keys.ts'
-import { fetchOrganizations, fetchOrgProjects } from '../data/queries.ts'
+import { fetchMe, fetchOrganizations } from '../data/queries.ts'
 import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { GetStartedPage } from '../features/orgs/GetStartedPage.tsx'
@@ -16,23 +16,24 @@ import { queryClient } from './queryClient.ts'
 
 const rootRoute = createRootRoute({ component: AppLayout })
 
-/** Landing: send the user to their personal org (or first org). A fresh org with no
- * projects yet lands in the guided get-started flow; otherwise straight to the dashboard. */
+/** Landing: send the user to their personal org (or first org). A user who hasn't finished
+ * the first-run onboarding lands in the guided get-started flow; everyone else goes straight
+ * to the dashboard. Completion is a durable per-user fact (`me.onboardingCompletedAt`), so
+ * it survives reloads and doesn't re-trigger just because a project was (or wasn't) created. */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   loader: async () => {
-    const orgs = await queryClient.ensureQueryData({ queryKey: keys.orgs(), queryFn: fetchOrganizations })
+    const [me, orgs] = await Promise.all([
+      queryClient.ensureQueryData({ queryKey: keys.me(), queryFn: fetchMe }),
+      queryClient.ensureQueryData({ queryKey: keys.orgs(), queryFn: fetchOrganizations }),
+    ])
     const target = orgs.find((o) => o.isPersonal) ?? orgs[0]
     if (target === undefined) {
       return
     }
-    const projects = await queryClient.ensureQueryData({
-      queryKey: keys.orgProjects(target.id),
-      queryFn: () => fetchOrgProjects(target.id),
-    })
     throw redirect(
-      projects.length === 0
+      me.onboardingCompletedAt === null
         ? { to: '/orgs/$orgId/get-started', params: { orgId: target.id } }
         : { to: '/orgs/$orgId', params: { orgId: target.id } },
     )

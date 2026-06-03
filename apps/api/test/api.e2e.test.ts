@@ -51,6 +51,12 @@ function bearer(apiKey: string): { authorization: string } {
   return { authorization: `Bearer ${apiKey}` }
 }
 
+/** Epoch ms for a date field. The in-memory treaty harness hands back Date objects where
+ * real HTTP would yield ISO strings (the serializer contract); this compares either form. */
+function ms(v: string | Date | null | undefined): number {
+  return v == null ? Number.NaN : new Date(v).getTime()
+}
+
 describe('health', () => {
   test('GET /health', async () => {
     const { data, status } = await h.api.health.get()
@@ -1174,6 +1180,67 @@ describe('activity', () => {
     const project = await newProject('act2')
     const stranger = await h.clientFor('55555555-5555-5555-5555-555555555555', { email: 'stranger5@example.com' })
     const res = await stranger.api.projects({ id: project.id }).activity.get()
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('me + onboarding', () => {
+  test('GET /api/me returns the user with onboarding not yet complete', async () => {
+    const res = await h.api.api.me.get()
+    expect(res.status).toBe(200)
+    expect(res.data?.id).toBe(SYSTEM_USER_ID)
+    expect(typeof res.data?.email).toBe('string')
+    expect(res.data?.onboardingCompletedAt).toBeNull()
+  })
+
+  test('POST /api/me/onboarding/complete stamps completion and is idempotent', async () => {
+    const first = await h.api.api.me.onboarding.complete.post()
+    expect(first.status).toBe(200)
+    const stamp = first.data?.onboardingCompletedAt
+    expect(ms(stamp)).not.toBeNaN()
+
+    // GET now reflects it…
+    const me = await h.api.api.me.get()
+    expect(ms(me.data?.onboardingCompletedAt)).toBe(ms(stamp))
+
+    // …and completing again keeps the original timestamp (never rewrites it).
+    const second = await h.api.api.me.onboarding.complete.post()
+    expect(ms(second.data?.onboardingCompletedAt)).toBe(ms(stamp))
+  })
+
+  test('/api/me requires authentication', async () => {
+    const res = await h.api.api.me.get({ headers: { authorization: '' } })
+    expect(res.status).toBe(401)
+  })
+})
+
+describe('agent key rotation', () => {
+  test('rotate-key mints a new working key and invalidates the old one', async () => {
+    const orgId = await personalOrgId()
+    const created = await h.api.api.organizations({ orgId }).agents.post({ name: 'rotate-bot' })
+    const agentId = created.data?.id ?? ''
+    const oldKey = created.data?.apiKey ?? ''
+    expect(await (await h.api.agent.v1.identity.get({ headers: bearer(oldKey) })).status).toBe(200)
+
+    const rotated = await h.api.api.agents({ id: agentId })['rotate-key'].post()
+    expect(rotated.status).toBe(200)
+    const newKey = rotated.data?.apiKey ?? ''
+    expect(newKey).not.toBe('')
+    expect(newKey).not.toBe(oldKey)
+
+    // New key authenticates as the same agent; the old key no longer works.
+    const withNew = await h.api.agent.v1.identity.get({ headers: bearer(newKey) })
+    expect(withNew.status).toBe(200)
+    expect(withNew.data?.id).toBe(agentId)
+    expect((await h.api.agent.v1.identity.get({ headers: bearer(oldKey) })).status).toBe(401)
+  })
+
+  test('rotate-key on another org’s agent is 404', async () => {
+    const orgId = await personalOrgId()
+    const created = await h.api.api.organizations({ orgId }).agents.post({ name: 'mine-bot' })
+    const agentId = created.data?.id ?? ''
+    const stranger = await h.clientFor('66666666-6666-6666-6666-666666666666', { email: 'stranger6@example.com' })
+    const res = await stranger.api.agents({ id: agentId })['rotate-key'].post()
     expect(res.status).toBe(404)
   })
 })

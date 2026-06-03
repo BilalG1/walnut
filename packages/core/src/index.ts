@@ -40,6 +40,8 @@ export {
 } from './ports.ts'
 export type { PortService, LocalDbUrlOptions } from './ports.ts'
 
+export { DEFAULT_WALNUT_API_URL, DEFAULT_WALNUT_WEB_URL } from './urls.ts'
+
 export {
   setupProjectRoles,
   createAgentRole,

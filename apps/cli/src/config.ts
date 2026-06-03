@@ -1,3 +1,4 @@
+import { DEFAULT_WALNUT_API_URL } from '@walnut/core'
 import { readCredentials } from './credentials.ts'
 import { EXIT } from './exit.ts'
 import { fail, type CliResult } from './output.ts'
@@ -6,8 +7,6 @@ export interface Config {
   apiUrl: string
   apiKey: string
 }
-
-const DEFAULT_API_URL = 'https://api.walnut.sh'
 
 function asString(value: string | boolean | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined
@@ -25,7 +24,7 @@ export async function resolveConfig(
 ): Promise<Config | CliResult> {
   const stored = await readCredentials(homeDir)
   const apiKey = asString(options['api-key']) ?? stored?.apiKey
-  const apiUrl = asString(options['api-url']) ?? stored?.apiUrl ?? DEFAULT_API_URL
+  const apiUrl = asString(options['api-url']) ?? stored?.apiUrl ?? DEFAULT_WALNUT_API_URL
   if (apiKey === undefined || apiKey === '') {
     return fail(
       EXIT.AUTH,

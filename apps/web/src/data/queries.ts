@@ -3,6 +3,27 @@ import { api } from '../api.ts'
 import { unwrap } from './http.ts'
 import { keys } from './keys.ts'
 
+/** Plain fetcher (used by the root route loader to decide first-run vs dashboard). */
+export function fetchMe() {
+  return unwrap(api.api.me.get())
+}
+
+export function useMe() {
+  return useQuery({ queryKey: keys.me(), queryFn: fetchMe })
+}
+
+/** Mark the first-run onboarding complete (idempotent server-side); refresh `me` so the
+ * sidebar gate and landing redirect react immediately. */
+export function useCompleteOnboarding() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => unwrap(api.api.me.onboarding.complete.post()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.me() })
+    },
+  })
+}
+
 /** Plain fetcher (used by the root route loader to pick a landing org). */
 export function fetchOrganizations() {
   return unwrap(api.api.organizations.get())
@@ -69,6 +90,19 @@ export function useCreateAgent(orgId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
       void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
+    },
+  })
+}
+
+/** Mint a fresh one-time API key for an existing agent (the old key stops working). The
+ * onboarding wizard uses this to recover a key after a reload, since the plaintext is never
+ * stored client-side. Refreshes the org roster (the key prefix changes). */
+export function useRotateAgentKey(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (agentId: string) => unwrap(api.api.agents({ id: agentId })['rotate-key'].post()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
     },
   })
 }
