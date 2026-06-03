@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
+import { hashKey, keyPrefix, newInviteToken, runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
 import {
   agentGrants,
   agentGrantScopes,
   branchDbRoles,
   branches,
+  organizationInvitations,
   organizationMembers,
   organizations,
 } from '@walnut/db'
@@ -1247,6 +1248,180 @@ describe('org members', () => {
     expect(res.status).toBe(404)
     // ...and the owner is untouched.
     expect((await h.api.api.organizations({ orgId }).members.get()).data?.length).toBe(1)
+  })
+})
+
+describe('org invitations', () => {
+  const INVITEE = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+  const OTHER = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+
+  /** A shared (non-personal) org owned by the seeded system user — invites require one. */
+  async function sharedOrg(): Promise<string> {
+    const [org] = await h.ctx.db.insert(organizations).values({ name: 'Shared Org' }).returning({ id: organizations.id })
+    if (org === undefined) {
+      throw new Error('failed to create shared org')
+    }
+    await h.ctx.db.insert(organizationMembers).values({ organizationId: org.id, userId: SYSTEM_USER_ID, role: 'owner' })
+    return org.id
+  }
+
+  async function createInvite(orgId: string): Promise<{ id: string; token: string }> {
+    const res = await h.api.api.organizations({ orgId }).invitations.post({})
+    const data = res.data
+    if (data === null) {
+      throw new Error(`createInvite failed: ${JSON.stringify(res.error?.value)}`)
+    }
+    return { id: data.id, token: data.token }
+  }
+
+  test('creating an invite returns a one-time token and stores only its hash', async () => {
+    const orgId = await sharedOrg()
+    const res = await h.api.api.organizations({ orgId }).invitations.post({})
+    expect(res.status).toBe(200)
+    expect(res.data?.status).toBe('pending')
+    expect(res.data?.role).toBe('member')
+    expect(res.data?.token?.startsWith('wln_inv_')).toBe(true)
+
+    const id = res.data?.id
+    if (id === undefined) {
+      throw new Error('no invite id')
+    }
+    const [row] = await h.ctx.db.select().from(organizationInvitations).where(eq(organizationInvitations.id, id))
+    // Only the hash (not the plaintext token) is persisted anywhere on the row.
+    expect(row?.tokenHash).not.toBe(res.data?.token)
+    expect(JSON.stringify(row)).not.toContain(res.data?.token ?? '')
+  })
+
+  test('invites can only be minted in shared orgs, not personal ones (400)', async () => {
+    const orgId = await personalOrgId()
+    const res = await h.api.api.organizations({ orgId }).invitations.post({})
+    expect(res.status).toBe(400)
+  })
+
+  test('GET lists live invites (never leaking the token); revoke drops them from the list', async () => {
+    const orgId = await sharedOrg()
+    const inv = await createInvite(orgId)
+    const listed = (await h.api.api.organizations({ orgId }).invitations.get()).data?.find((i) => i.id === inv.id)
+    expect(listed).toBeDefined()
+    // The list view exposes only a non-secret prefix — never the token or its hash.
+    const fields = listed as Record<string, unknown> | undefined
+    expect(fields?.token).toBeUndefined()
+    expect(fields?.tokenHash).toBeUndefined()
+    expect(typeof fields?.tokenPrefix).toBe('string')
+
+    const rev = await h.api.api.organizations({ orgId }).invitations({ invitationId: inv.id }).delete()
+    expect(rev.status).toBe(200)
+    expect((await h.api.api.organizations({ orgId }).invitations.get()).data?.some((i) => i.id === inv.id)).toBe(false)
+  })
+
+  test('a non-member cannot create, list, or revoke invites (404)', async () => {
+    const orgId = await sharedOrg()
+    const inv = await createInvite(orgId)
+    const stranger = await h.clientFor('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', { email: 'strangerE@example.com' })
+    expect((await stranger.api.organizations({ orgId }).invitations.post({})).status).toBe(404)
+    expect((await stranger.api.organizations({ orgId }).invitations.get()).status).toBe(404)
+    expect(
+      (await stranger.api.organizations({ orgId }).invitations({ invitationId: inv.id }).delete()).status,
+    ).toBe(404)
+  })
+
+  test('previewing a link reports the org, role, and validity', async () => {
+    const orgId = await sharedOrg()
+    const { token } = await createInvite(orgId)
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    const res = await invitee.api.invitations({ token }).get()
+    expect(res.status).toBe(200)
+    expect(res.data?.organizationId).toBe(orgId)
+    expect(res.data?.organizationName).toBe('Shared Org')
+    expect(res.data?.role).toBe('member')
+    expect(res.data?.state).toBe('valid')
+    expect(res.data?.alreadyMember).toBe(false)
+  })
+
+  test('accepting a link joins the redeemer to the org with the invite role', async () => {
+    const orgId = await sharedOrg()
+    const { token } = await createInvite(orgId)
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    await invitee.api.organizations.get()
+
+    const res = await invitee.api.invitations({ token }).accept.post()
+    expect(res.status).toBe(200)
+    expect(res.data?.organizationId).toBe(orgId)
+
+    const joined = (await h.api.api.organizations({ orgId }).members.get()).data?.find((m) => m.userId === INVITEE)
+    expect(joined?.role).toBe('member')
+    // Real membership: the invitee can now read the org's projects.
+    expect((await invitee.api.organizations({ orgId }).projects.get()).status).toBe(200)
+  })
+
+  test('a link is single-use: a second redeemer is refused (400) and the link reads spent', async () => {
+    const orgId = await sharedOrg()
+    const { token } = await createInvite(orgId)
+    const first = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    const second = await h.clientFor(OTHER, { email: 'other@example.com' })
+    await first.api.organizations.get()
+    await second.api.organizations.get()
+
+    expect((await first.api.invitations({ token }).accept.post()).status).toBe(200)
+    expect((await second.api.invitations({ token }).accept.post()).status).toBe(400)
+    expect((await h.api.api.organizations({ orgId }).members.get()).data?.some((m) => m.userId === OTHER)).toBe(false)
+    expect((await second.api.invitations({ token }).get()).data?.state).toBe('accepted')
+  })
+
+  test('re-accepting as an already-joined member is an idempotent success (no duplicate)', async () => {
+    const orgId = await sharedOrg()
+    const { token } = await createInvite(orgId)
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    await invitee.api.organizations.get()
+    expect((await invitee.api.invitations({ token }).accept.post()).status).toBe(200)
+    expect((await invitee.api.invitations({ token }).accept.post()).status).toBe(200)
+    expect(
+      (await h.api.api.organizations({ orgId }).members.get()).data?.filter((m) => m.userId === INVITEE).length,
+    ).toBe(1)
+  })
+
+  test('an expired link reads expired and cannot be accepted (400)', async () => {
+    const orgId = await sharedOrg()
+    // Seed a link that lapsed a second ago (no API mints expired links).
+    const token = newInviteToken()
+    await h.ctx.db.insert(organizationInvitations).values({
+      organizationId: orgId,
+      role: 'member',
+      tokenHash: hashKey(token),
+      tokenPrefix: keyPrefix(token),
+      invitedByUserId: SYSTEM_USER_ID,
+      expiresAt: new Date(Date.now() - 1000),
+    })
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    await invitee.api.organizations.get()
+    expect((await invitee.api.invitations({ token }).get()).data?.state).toBe('expired')
+    expect((await invitee.api.invitations({ token }).accept.post()).status).toBe(400)
+  })
+
+  test('previewing as an already-joined member reports alreadyMember: true', async () => {
+    const orgId = await sharedOrg()
+    const { token } = await createInvite(orgId)
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    await invitee.api.organizations.get()
+    expect((await invitee.api.invitations({ token }).accept.post()).status).toBe(200)
+    const res = await invitee.api.invitations({ token }).get()
+    expect(res.data?.alreadyMember).toBe(true)
+    expect(res.data?.state).toBe('accepted')
+  })
+
+  test('accepting a revoked link is refused (400)', async () => {
+    const orgId = await sharedOrg()
+    const inv = await createInvite(orgId)
+    await h.api.api.organizations({ orgId }).invitations({ invitationId: inv.id }).delete()
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    await invitee.api.organizations.get()
+    expect((await invitee.api.invitations({ token: inv.token }).accept.post()).status).toBe(400)
+  })
+
+  test('an unknown token is 404 on preview and accept', async () => {
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    expect((await invitee.api.invitations({ token: 'wln_inv_deadbeef' }).get()).status).toBe(404)
+    expect((await invitee.api.invitations({ token: 'wln_inv_deadbeef' }).accept.post()).status).toBe(404)
   })
 })
 
