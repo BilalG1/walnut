@@ -24,6 +24,12 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
     .onError(({ code, error, set }) => {
       if (error instanceof HttpError) {
         set.status = error.status
+        // Surface a standard Retry-After (seconds) for rate-limit responses alongside the
+        // machine-readable retryAfterMs in the body. Only when there's a real wait — a
+        // "retry immediately" (0) carries no useful header.
+        if (typeof error.body.retryAfterMs === 'number' && error.body.retryAfterMs > 0) {
+          set.headers['retry-after'] = String(Math.ceil(error.body.retryAfterMs / 1000))
+        }
         return error.body
       }
       if (code === 'VALIDATION') {

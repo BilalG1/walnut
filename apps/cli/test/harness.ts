@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { treaty } from '@elysiajs/eden'
 import { createApp, createContext, createTestAuth, ensureSeed, type OwnedContext } from '@walnut/api/testing'
-import { SYSTEM_USER_ID } from '@walnut/core'
+import { createRateLimiter, SYSTEM_USER_ID } from '@walnut/core'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
@@ -138,6 +138,9 @@ export async function createCliHarness(): Promise<CliHarness> {
   }
 
   const { verifier, mintToken } = await createTestAuth()
+  // Frozen-clock limiter + per-test reset (below) keeps rate limiting transparent to CLI tests,
+  // which exercise CLI behavior, not the limits themselves.
+  const rateLimiter = createRateLimiter(() => 1_000_000)
   const ctx = createContext(
     TEST_DB_URL,
     {
@@ -146,6 +149,7 @@ export async function createCliHarness(): Promise<CliHarness> {
       localDbPrefix: DB_PREFIX,
     },
     verifier,
+    rateLimiter,
   )
   const app = createApp(ctx)
   // Dashboard calls (project/agent creation, scope approval) run as the seeded user.
@@ -245,6 +249,7 @@ export async function createCliHarness(): Promise<CliHarness> {
   }
 
   async function reset(): Promise<void> {
+    ctx.rateLimiter.reset()
     await ctx.db.execute(sql`TRUNCATE TABLE users, organizations RESTART IDENTITY CASCADE`)
     await ensureSeed(ctx)
     await deleteCredentials(homeDir)

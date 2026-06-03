@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { QUERY_LIMITS, RESOURCE_LIMITS, runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
+import {
+  MAX_CONCURRENT_QUERIES_PER_BRANCH,
+  QUERY_LIMITS,
+  RATE_LIMITS,
+  type RateLimitName,
+  RESOURCE_LIMITS,
+  runSql,
+  scopeSetKey,
+  SYSTEM_USER_ID,
+} from '@walnut/core'
 import {
   agents,
   agentGrants,
@@ -1877,5 +1886,75 @@ describe('query limits', () => {
     expect(res.status).toBe(200)
     expect(res.data?.truncated).toBe(false)
     expect(res.data?.rows).toEqual([{ n: 1 }])
+  })
+})
+
+describe('rate limits', () => {
+  // Buckets/gauges are drained directly through the shared limiter (h.ctx.rateLimiter is the
+  // same instance the middleware uses), then one real request proves the 429. The harness's
+  // frozen clock keeps a drained bucket drained, and reset() clears it before the next test.
+  function drain(name: RateLimitName, key: string): void {
+    for (let i = 0; i < RATE_LIMITS[name].capacity; i++) {
+      h.ctx.rateLimiter.take(name, key)
+    }
+  }
+
+  test('agent query is rate-limited per agent', async () => {
+    const agent = await newAgent()
+    drain('agentQuery', agent.id)
+    const res = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(429)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('rate_limited')
+    expect(body?.limit).toBe('agentQuery')
+  })
+
+  test('normal traffic is not rate-limited', async () => {
+    const agent = await newAgent()
+    // A fresh bucket never 429s on the first call (it's a scope 403 here — but not rate-limited).
+    const res = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: bearer(agent.apiKey) })
+    expect(res.status).not.toBe(429)
+  })
+
+  test('provisioning is rate-limited per user', async () => {
+    drain('provisioningPerUser', SYSTEM_USER_ID)
+    const res = await h.api.api.projects.post({ name: 'rl' })
+    expect(res.status).toBe(429)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('rate_limited')
+    expect(body?.limit).toBe('provisioningPerUser')
+  })
+
+  test('concurrent queries per branch are capped', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    const [main] = await h.ctx.db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(and(eq(branches.projectId, project.id), eq(branches.isDefault, true)))
+    if (main === undefined) throw new Error('no main branch')
+    // Hold every concurrency slot for the branch so the next query can't acquire one.
+    for (let i = 0; i < MAX_CONCURRENT_QUERIES_PER_BRANCH; i++) {
+      h.ctx.rateLimiter.acquire(`branch:${main.id}`, MAX_CONCURRENT_QUERIES_PER_BRANCH)
+    }
+    const res = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(429)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('too_many_concurrent_queries')
+  })
+
+  test('scope requests are rate-limited per agent', async () => {
+    const agent = await newAgent()
+    drain('scopeRequestPerAgent', agent.id)
+    const res = await h.api.agent.v1['scope-requests'].post({ scopes: ['db:read'] }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(429)
+    expect((res.error?.value as ErrorBody | undefined)?.limit).toBe('scopeRequestPerAgent')
+  })
+
+  test('key rotation is rate-limited per agent', async () => {
+    const agent = await newAgent()
+    drain('keyRotationPerAgent', agent.id)
+    const res = await h.api.api.agents({ id: agent.id })['rotate-key'].post()
+    expect(res.status).toBe(429)
+    expect((res.error?.value as ErrorBody | undefined)?.limit).toBe('keyRotationPerAgent')
   })
 })

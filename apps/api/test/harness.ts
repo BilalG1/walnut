@@ -1,5 +1,5 @@
 import { treaty } from '@elysiajs/eden'
-import { SYSTEM_USER_ID } from '@walnut/core'
+import { createRateLimiter, SYSTEM_USER_ID } from '@walnut/core'
 import { localPostgresUrl } from '@walnut/core/ports'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
@@ -115,7 +115,10 @@ export async function createHarness(): Promise<Harness> {
   }
 
   const { verifier, mintToken } = await createTestAuth()
-  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL }, verifier)
+  // Frozen-clock limiter so rate-limit tests are deterministic (no refill mid-test); reset()
+  // clears its buckets between cases so a test's requests never spill into the next.
+  const rateLimiter = createRateLimiter(() => 1_000_000)
+  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL }, verifier, rateLimiter)
   const app = createApp(ctx)
 
   // Every request from `api` is authed as the seeded system user, so existing tests
@@ -132,6 +135,7 @@ export async function createHarness(): Promise<Harness> {
   }
 
   async function reset(): Promise<void> {
+    ctx.rateLimiter.reset()
     await ctx.db.execute(sql`TRUNCATE TABLE users, organizations RESTART IDENTITY CASCADE`)
     await ensureSeed(ctx)
   }

@@ -57,3 +57,6 @@ export {
   byteLength,
 } from './limits.ts'
 export type { RateBudget, RateLimitName, LimitExceededInfo } from './limits.ts'
+
+export { createRateLimiter } from './rate-limit.ts'
+export type { RateLimiter, RateLimitResult } from './rate-limit.ts'

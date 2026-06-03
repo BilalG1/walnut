@@ -10,6 +10,7 @@ import {
 import { and, count, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { badRequest, HttpError, limitExceeded, notFound } from '../errors.ts'
+import { enforceRate } from '../rate-limit.ts'
 import { grantScopes, resolveAgentProject } from './agents.ts'
 import { assertOrgMember } from './organizations.ts'
 import { getProjectInternal } from './projects.ts'
@@ -110,6 +111,7 @@ export interface ScopeRequestInput {
 }
 
 export async function createScopeRequest(ctx: AppContext, agent: Agent, input: ScopeRequestInput): Promise<ScopeRequest> {
+  enforceRate(ctx.rateLimiter, 'scopeRequestPerAgent', agent.id)
   // Cap outstanding (pending) requests per agent so a flood can't spam the dashboard
   // with notifications or grow metadata unbounded. Resolved requests don't count.
   const [{ n: pendingCount } = { n: 0 }] = await ctx.db

@@ -3,7 +3,16 @@ import { agentGrants, branches, organizationMembers, projects, scopeRequests, ty
 import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { badRequest, HttpError, limitExceeded, notFound } from '../errors.ts'
+import { enforceRate } from '../rate-limit.ts'
 import { assertOrgMember, getDefaultOrgId } from './organizations.ts'
+
+/** Burst-limit a provisioning op (create/delete project or branch). Per-user keeps one tenant
+ * from storming; the shared `global` bucket shields the single Neon account's API rate limit
+ * from all tenants at once. Both buckets must have a token. */
+function enforceProvisioningRate(ctx: AppContext, userId: string): void {
+  enforceRate(ctx.rateLimiter, 'provisioningPerUser', userId)
+  enforceRate(ctx.rateLimiter, 'provisioningGlobal', 'global')
+}
 
 /** A user's projects: those in any organization they're a member of. */
 export async function listProjects(ctx: AppContext, userId: string): Promise<Project[]> {
@@ -161,6 +170,7 @@ export async function createProject(
   input: { name: string },
   orgId?: string,
 ): Promise<Project> {
+  enforceProvisioningRate(ctx, userId)
   // Create in the requested org (membership-checked) or fall back to the personal org.
   let organizationId: string
   if (orgId === undefined) {
@@ -271,6 +281,7 @@ async function teardownProvider(
 }
 
 export async function deleteProject(ctx: AppContext, id: string, userId: string): Promise<void> {
+  enforceProvisioningRate(ctx, userId)
   const project = await getProject(ctx, id, userId)
   const projBranches = await ctx.db
     .select({ id: branches.id, providerBranchId: branches.providerBranchId })
@@ -337,6 +348,7 @@ export async function createBranch(
   userId: string,
   input: { name: string; from?: string },
 ): Promise<Branch> {
+  enforceProvisioningRate(ctx, userId)
   const project = await getProject(ctx, projectId, userId)
   if (!BRANCH_NAME_RE.test(input.name)) {
     throw badRequest('Invalid branch name. Use letters, digits, and ._/- (max 64 chars).')
@@ -447,6 +459,7 @@ export async function createBranch(
  * branch row; the polymorphic grants/scope-requests (no FK) are cleared explicitly.
  */
 export async function deleteBranch(ctx: AppContext, projectId: string, name: string, userId: string): Promise<void> {
+  enforceProvisioningRate(ctx, userId)
   const project = await getProject(ctx, projectId, userId)
   const branch = await resolveBranch(ctx, projectId, name)
   if (branch.isDefault) {

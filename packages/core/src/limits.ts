@@ -95,8 +95,10 @@ export const RATE_LIMITS = {
   scopeRequestPerAgent: { capacity: 20, refillPerSec: 20 / 3600 },
   /** Agent key rotation, keyed per agent: 10/hour. */
   keyRotationPerAgent: { capacity: 10, refillPerSec: 10 / 3600 },
-  /** Auth / login / token issuance, keyed per client IP: 30/min — a brute-force /
-   * mint-storm guard. */
+  /** Reserved: per-client-IP budget for a first-party login / token-issuance endpoint (30/min —
+   * a brute-force / mint-storm guard). Not wired yet — dashboard auth verifies externally-issued
+   * Hexclave JWTs offline (no first-party login endpoint), and the only token-minting route is the
+   * dev-only bypass. Wire this when a real login endpoint lands. */
   authPerIp: { capacity: 30, refillPerSec: 30 / 60 },
 } as const satisfies Record<string, RateBudget>
 

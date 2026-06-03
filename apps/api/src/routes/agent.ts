@@ -1,7 +1,9 @@
+import { MAX_CONCURRENT_QUERIES_PER_BRANCH } from '@walnut/core'
 import { Elysia, t } from 'elysia'
 import { extractBearer } from '../auth/bearer.ts'
 import type { AppContext } from '../context.ts'
 import { HttpError, unauthorized } from '../errors.ts'
+import { enforceRate } from '../rate-limit.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
 import { agentScopesForBranch, findAgentByKey, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
@@ -55,6 +57,8 @@ export function agentApiRoutes(ctx: AppContext) {
     .post(
       '/query',
       async ({ agent, body }) => {
+        // Per-agent query rate limit (burst protection) before any work.
+        enforceRate(ctx.rateLimiter, 'agentQuery', agent.id)
         // Pick the target project (explicit, or the agent's sole granted project) and the target
         // branch (named, or the default), then run over that branch's scoped connection for the
         // agent's effective scopes there (the union of its project + branch grants) — defense in
@@ -62,6 +66,17 @@ export function agentApiRoutes(ctx: AppContext) {
         const project = await resolveAgentProject(ctx, agent, body.projectId)
         const branch = await resolveBranch(ctx, project.id, body.branch)
         const scopeRows = await agentScopesForBranch(ctx, agent.id, project.id, branch.id)
+        // Cap concurrent in-flight queries per branch — each opens its own connection, so this
+        // bounds connections to one branch DB regardless of how many agents target it at once.
+        const release = ctx.rateLimiter.acquire(`branch:${branch.id}`, MAX_CONCURRENT_QUERIES_PER_BRANCH)
+        if (release === null) {
+          throw new HttpError(429, {
+            error: 'too_many_concurrent_queries',
+            message: `Too many concurrent queries on branch "${branch.name}". Retry shortly.`,
+            limit: 'concurrent_queries_per_branch',
+            retryAfterMs: 0,
+          })
+        }
         const startedAt = Date.now()
         try {
           const result = await runAgentQuery(ctx, branch, scopeRows, body.sql)
@@ -94,6 +109,8 @@ export function agentApiRoutes(ctx: AppContext) {
             })
           }
           throw err
+        } finally {
+          release()
         }
       },
       {

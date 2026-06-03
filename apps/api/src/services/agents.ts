@@ -26,6 +26,7 @@ import {
 import { and, count, desc, eq, inArray, notExists, or, sql } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, limitExceeded, notFound } from '../errors.ts'
+import { enforceRate } from '../rate-limit.ts'
 import { assertOrgMember } from './organizations.ts'
 import { getProjectInternal, listProjectsInOrg } from './projects.ts'
 
@@ -274,7 +275,10 @@ export async function rotateAgentKey(
   agentId: string,
   userId: string,
 ): Promise<CreatedAgent> {
+  // Membership is checked first (getAgent) so the per-agent bucket can't be griefed by a
+  // non-owner; only authorized rotations count against it.
   const { agent, grants } = await getAgent(ctx, agentId, userId)
+  enforceRate(ctx.rateLimiter, 'keyRotationPerAgent', agentId)
   const apiKey = newAgentKey()
   const [updated] = await ctx.db
     .update(agents)
