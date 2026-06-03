@@ -159,11 +159,12 @@ describe('agents', () => {
     expect(res.status).toBe(404)
   })
 
-  test('GET /api/agents/:id returns the agent without its key', async () => {
+  test('GET /api/agents/:id returns the agent (with an empty grant breakdown) and no key', async () => {
     const agent = await newAgent()
     const res = await h.api.api.agents({ id: agent.id }).get()
     expect(res.data?.id).toBe(agent.id)
     expect(res.data?.keyPrefix.startsWith('wln_agt_')).toBe(true)
+    expect(res.data?.grants).toEqual([])
     expect(Object.keys(res.data ?? {})).not.toContain('apiKey')
   })
 
@@ -1607,4 +1608,109 @@ describe('agent key rotation', () => {
     const res = await stranger.api.agents({ id: agentId })['rotate-key'].post()
     expect(res.status).toBe(404)
   })
+})
+
+describe('agent grant revocation', () => {
+  /** The agent's grant breakdown from the detail endpoint. */
+  async function grantsOf(agentId: string) {
+    const res = await h.api.api.agents({ id: agentId }).get()
+    if (res.data === null) {
+      throw new Error(`getAgent failed: ${JSON.stringify(res.error?.value)}`)
+    }
+    return res.data.grants
+  }
+
+  test('detail endpoint reports each grant with its id, resource and live scopes', async () => {
+    const project = await newProject('detail-proj')
+    const agent = await newAgent('detail-bot')
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
+
+    const grants = await grantsOf(agent.id)
+    expect(grants.length).toBe(1)
+    const g = grants[0]
+    expect(typeof g?.id).toBe('string')
+    expect(g?.resourceType).toBe('project')
+    expect(g?.resourceId).toBe(project.id)
+    expect(g?.resourceName).toBe('detail-proj')
+    expect(g?.scopes.map((s) => s.scope).toSorted()).toEqual(['db:read', 'db:write'])
+    expect(g?.scopes.every((s) => s.expiresAt === null)).toBe(true)
+  }, 20_000)
+
+  test('revoking a single scope drops it from effective access; the rest still works', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
+    const grantId = (await grantsOf(agent.id))[0]?.id ?? ''
+
+    const revoked = await h.api.api.agents({ id: agent.id }).grants({ grantId }).scopes({ scope: 'db:write' }).delete()
+    expect(revoked.status).toBe(200)
+    expect(revoked.data).toEqual({ revoked: true })
+
+    // Detail now shows only db:read on the (still-present) grant.
+    const grants = await grantsOf(agent.id)
+    expect(grants.length).toBe(1)
+    expect(grants[0]?.scopes.map((s) => s.scope)).toEqual(['db:read'])
+
+    // A read still succeeds; a write is now denied for the missing scope.
+    const read = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: bearer(agent.apiKey) })
+    expect(read.status).toBe(200)
+    const write = await h.api.agent.v1.query.post(
+      { sql: 'INSERT INTO t (x) VALUES (1)' },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(write.status).toBe(403)
+    expect((write.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['db:write'])
+  }, 20_000)
+
+  test('revoking the whole grant removes all access on that resource', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write'])
+    const grantId = (await grantsOf(agent.id))[0]?.id ?? ''
+
+    const revoked = await h.api.api.agents({ id: agent.id }).grants({ grantId }).delete()
+    expect(revoked.status).toBe(200)
+    expect(revoked.data).toEqual({ revoked: true })
+
+    expect(await grantsOf(agent.id)).toEqual([])
+    const read = await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: bearer(agent.apiKey) })
+    expect(read.status).toBe(403)
+    expect((read.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['db:read'])
+  }, 20_000)
+
+  test('revoking the last scope deletes the now-empty grant row', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    await grant(agent.apiKey, project.id, ['db:read'])
+    const grantId = (await grantsOf(agent.id))[0]?.id ?? ''
+
+    await h.api.api.agents({ id: agent.id }).grants({ grantId }).scopes({ scope: 'db:read' }).delete()
+
+    expect(await grantsOf(agent.id)).toEqual([])
+    const rows = await h.ctx.db.select().from(agentGrants).where(eq(agentGrants.agentId, agent.id))
+    expect(rows.length).toBe(0)
+  }, 20_000)
+
+  test('revocation is org-scoped and 404s on unknown grant or unheld scope', async () => {
+    const project = await newProject()
+    const agent = await newAgent()
+    await grant(agent.apiKey, project.id, ['db:read'])
+    const grantId = (await grantsOf(agent.id))[0]?.id ?? ''
+
+    // A user in another org can't revoke this agent's grant — whole grant or a single scope.
+    const stranger = await h.clientFor('55555555-5555-5555-5555-555555555555', { email: 'stranger5@example.com' })
+    expect((await stranger.api.agents({ id: agent.id }).grants({ grantId }).delete()).status).toBe(404)
+    expect(
+      (await stranger.api.agents({ id: agent.id }).grants({ grantId }).scopes({ scope: 'db:read' }).delete()).status,
+    ).toBe(404)
+
+    // Unknown grant id → 404.
+    const unknown = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    expect((await h.api.api.agents({ id: agent.id }).grants({ grantId: unknown }).delete()).status).toBe(404)
+
+    // A scope the grant doesn't hold → 404 (and the held scope is untouched).
+    const miss = await h.api.api.agents({ id: agent.id }).grants({ grantId }).scopes({ scope: 'db:delete' }).delete()
+    expect(miss.status).toBe(404)
+    expect((await grantsOf(agent.id))[0]?.scopes.map((s) => s.scope)).toEqual(['db:read'])
+  }, 20_000)
 })

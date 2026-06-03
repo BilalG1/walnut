@@ -3,6 +3,7 @@ import {
   effectiveScopes,
   ensureScopeRole,
   hashKey,
+  isAgentScope,
   keyPrefix,
   newAgentKey,
   scopeSetKey,
@@ -21,7 +22,7 @@ import {
   type GrantResourceType,
   type Project,
 } from '@walnut/db'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, notExists, or, sql } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { HttpError, notFound } from '../errors.ts'
 import { assertOrgMember } from './organizations.ts'
@@ -79,6 +80,31 @@ async function projectNames(ctx: AppContext, ids: string[]): Promise<Map<string,
   }
   const rows = await ctx.db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, ids))
   return new Map(rows.map((r) => [r.id, r.name]))
+}
+
+/** A display label for each grant's resource, keyed by resourceId: project grants → the project
+ * name; branch grants → `"<project> / <branch>"`. Org grants carry no database scopes (so they
+ * never surface on the detail page) and are skipped. Bulk-loads to avoid N+1 over grants. */
+async function resourceNamesForGrants(ctx: AppContext, grants: AgentGrant[]): Promise<Record<string, string>> {
+  const names: Record<string, string> = {}
+  const projectIds = grants.filter((g) => g.resourceType === 'project').map((g) => g.resourceId)
+  const branchIds = grants.filter((g) => g.resourceType === 'branch').map((g) => g.resourceId)
+  if (projectIds.length > 0) {
+    for (const [id, name] of await projectNames(ctx, projectIds)) {
+      names[id] = name
+    }
+  }
+  if (branchIds.length > 0) {
+    const rows = await ctx.db
+      .select({ id: branches.id, branch: branches.name, project: projects.name })
+      .from(branches)
+      .innerJoin(projects, eq(branches.projectId, projects.id))
+      .where(inArray(branches.id, branchIds))
+    for (const r of rows) {
+      names[r.id] = `${r.project} / ${r.branch}`
+    }
+  }
+  return names
 }
 
 /** The ids of the projects an agent currently holds a project grant on. */
@@ -264,6 +290,74 @@ export async function deleteAgent(ctx: AppContext, id: string, userId: string): 
   // Nothing to tear down at the engine: scope roles are shared per database (keyed by scope
   // set, not agent) and outlive any single agent. Cascade removes the agent's grant + scope rows.
   await ctx.db.delete(agents).where(eq(agents.id, agent.id))
+}
+
+/** An agent, its grants, and a resourceId→label map for those grants — what the agent detail /
+ * management page renders. */
+export interface AgentDetail extends AgentWithGrants {
+  resourceNames: Record<string, string>
+}
+
+export async function getAgentDetail(ctx: AppContext, id: string, userId: string): Promise<AgentDetail> {
+  const { agent, grants } = await getAgent(ctx, id, userId)
+  return { agent, grants, resourceNames: await resourceNamesForGrants(ctx, grants) }
+}
+
+/** Load an agent's grant by id, asserting it belongs to `agentId` (and, via getAgent, that the
+ * agent is in the caller's org). 404 otherwise — no existence leak across agents or orgs. */
+async function getOwnedGrant(ctx: AppContext, agentId: string, grantId: string, userId: string): Promise<AgentGrant> {
+  await getAgent(ctx, agentId, userId)
+  const [grant] = await ctx.db.select().from(agentGrants).where(eq(agentGrants.id, grantId)).limit(1)
+  if (grant === undefined || grant.agentId !== agentId) {
+    throw notFound('Grant')
+  }
+  return grant
+}
+
+/**
+ * Revoke an agent's entire grant on a resource: delete the grant row, cascading its scope rows.
+ * A **pure metadata delete** — the mirror of {@link grantScopes}. No Postgres role is touched;
+ * the agent's next query on that resource simply resolves to a lesser (or no) scoped connection.
+ */
+export async function revokeGrant(ctx: AppContext, agentId: string, grantId: string, userId: string): Promise<void> {
+  const grant = await getOwnedGrant(ctx, agentId, grantId, userId)
+  await ctx.db.delete(agentGrants).where(eq(agentGrants.id, grant.id))
+}
+
+/**
+ * Revoke a single scope from an agent's grant. Deletes that scope row; if it was the grant's
+ * last scope, the now-empty grant row is removed too (no dangling no-access grants). Pure
+ * metadata delete, like {@link revokeGrant}. 404 if the scope isn't held on the grant.
+ */
+export async function revokeGrantScope(
+  ctx: AppContext,
+  agentId: string,
+  grantId: string,
+  scope: string,
+  userId: string,
+): Promise<void> {
+  const grant = await getOwnedGrant(ctx, agentId, grantId, userId)
+  if (!isAgentScope(scope)) {
+    throw notFound('Scope')
+  }
+  // Delete the scope row, then drop the grant iff that left it empty — both in one transaction,
+  // and the grant-delete is a single conditional statement (no select-then-delete window) so a
+  // concurrent re-grant of another scope can't be clobbered.
+  await ctx.db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(agentGrantScopes)
+      .where(and(eq(agentGrantScopes.grantId, grant.id), eq(agentGrantScopes.scope, scope)))
+      .returning({ id: agentGrantScopes.id })
+    if (deleted.length === 0) {
+      throw notFound('Scope')
+    }
+    await tx.delete(agentGrants).where(
+      and(
+        eq(agentGrants.id, grant.id),
+        notExists(tx.select({ one: sql`1` }).from(agentGrantScopes).where(eq(agentGrantScopes.grantId, grant.id))),
+      ),
+    )
+  })
 }
 
 export async function findAgentByKey(ctx: AppContext, key: string): Promise<Agent | undefined> {

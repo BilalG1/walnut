@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { Plus } from '@walnut/icons'
 import { Avatar, Badge, Button, Card, EmptyState, Spinner } from '@walnut/ui'
 import { useState } from 'react'
@@ -62,13 +63,19 @@ function AgentsView({ orgId }: { orgId: string }) {
                   return (
                     <tr key={a.id} className="hover:bg-hover align-top">
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
+                        <Link
+                          to="/orgs/$orgId/agents/$agentId"
+                          params={{ orgId, agentId: a.id }}
+                          className="group flex items-center gap-2.5"
+                        >
                           <Avatar label={a.name} size={28} gradient="from-sky-500 to-indigo-600" />
                           <div>
-                            <div className="font-medium">{a.name}</div>
+                            <div className="font-medium group-hover:text-walnut-600 dark:group-hover:text-walnut-400">
+                              {a.name}
+                            </div>
                             <div className="font-mono text-[11px] text-subtle">{a.keyPrefix}</div>
                           </div>
-                        </div>
+                        </Link>
                       </td>
                       <td className="px-4 py-3">
                         {projectGrants.length === 0 ? (

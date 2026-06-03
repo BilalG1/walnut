@@ -94,15 +94,64 @@ export function useCreateAgent(orgId: string) {
   })
 }
 
+/** One agent with the per-resource breakdown of its live access — the agent detail /
+ * management page's source. */
+export function useAgent(agentId: string) {
+  return useQuery({
+    queryKey: keys.agent(agentId),
+    queryFn: () => unwrap(api.api.agents({ id: agentId }).get()),
+  })
+}
+
 /** Mint a fresh one-time API key for an existing agent (the old key stops working). The
- * onboarding wizard uses this to recover a key after a reload, since the plaintext is never
- * stored client-side. Refreshes the org roster (the key prefix changes). */
+ * onboarding wizard and the agent detail page use this to (re)issue a key; the plaintext is
+ * never stored server-side. Refreshes the org roster and the agent (the key prefix changes). */
 export function useRotateAgentKey(orgId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (agentId: string) => unwrap(api.api.agents({ id: agentId })['rotate-key'].post()),
+    onSuccess: (_data, agentId) => {
+      void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
+      void qc.invalidateQueries({ queryKey: keys.agent(agentId) })
+    },
+  })
+}
+
+/** Refresh everything that reflects an agent's access after a grant change. */
+function invalidateAgentAccess(qc: ReturnType<typeof useQueryClient>, orgId: string, agentId: string) {
+  void qc.invalidateQueries({ queryKey: keys.agent(agentId) })
+  void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
+  void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
+}
+
+/** Revoke a single scope from one of an agent's grants (e.g. drop db:write, keep db:read).
+ * Pure metadata change server-side; the agent's next query resolves to a lesser connection. */
+export function useRevokeScope(orgId: string, agentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ grantId, scope }: { grantId: string; scope: string }) =>
+      unwrap(api.api.agents({ id: agentId }).grants({ grantId }).scopes({ scope }).delete()),
+    onSuccess: () => invalidateAgentAccess(qc, orgId, agentId),
+  })
+}
+
+/** Revoke an agent's entire grant on a resource (all scopes there at once). */
+export function useRevokeGrant(orgId: string, agentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (grantId: string) => unwrap(api.api.agents({ id: agentId }).grants({ grantId }).delete()),
+    onSuccess: () => invalidateAgentAccess(qc, orgId, agentId),
+  })
+}
+
+/** Delete an agent entirely, then refresh the org roster and project counts. */
+export function useDeleteAgent(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (agentId: string) => unwrap(api.api.agents({ id: agentId }).delete()),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.orgAgents(orgId) })
+      void qc.invalidateQueries({ queryKey: keys.orgProjects(orgId) })
     },
   })
 }

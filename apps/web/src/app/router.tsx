@@ -3,6 +3,7 @@ import { AppLayout } from '../components/layout/AppLayout.tsx'
 import { keys } from '../data/keys.ts'
 import { fetchMe, fetchOrganizations } from '../data/queries.ts'
 import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
+import { AgentDetailPage } from '../features/orgs/AgentDetailPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { GetStartedPage } from '../features/orgs/GetStartedPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
@@ -46,6 +47,11 @@ const orgRoute = createRoute({ getParentRoute: () => rootRoute, path: 'orgs/$org
 const orgIndexRoute = createRoute({ getParentRoute: () => orgRoute, path: '/', component: ProjectsPage })
 const orgGetStartedRoute = createRoute({ getParentRoute: () => orgRoute, path: 'get-started', component: GetStartedPage })
 const orgAgentsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'agents', component: AgentsPage })
+const orgAgentDetailRoute = createRoute({
+  getParentRoute: () => orgRoute,
+  path: 'agents/$agentId',
+  component: AgentDetailPage,
+})
 const orgRequestsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'requests', component: RequestsPage })
 const orgMembersRoute = createRoute({
   getParentRoute: () => orgRoute,
@@ -83,6 +89,7 @@ const routeTree = rootRoute.addChildren([
     orgIndexRoute,
     orgGetStartedRoute,
     orgAgentsRoute,
+    orgAgentDetailRoute,
     orgRequestsRoute,
     orgMembersRoute,
     orgSettingsRoute,

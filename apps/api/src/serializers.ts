@@ -188,6 +188,51 @@ export function toOrgAgentView(
   }
 }
 
+/** One of an agent's grants on the agent detail page: the resource it applies to (with a
+ * ready-to-render label) and the agent's live scopes there. Carries the grant `id` so the UI
+ * can revoke a whole grant or a single scope by addressing it directly. */
+export interface AgentGrantView {
+  id: string
+  resourceType: string
+  resourceId: string
+  /** Display label for the resource — a project name, or `"<project> / <branch>"`; null if
+   * the name couldn't be resolved. */
+  resourceName: string | null
+  scopes: ScopeGrantView[]
+}
+
+/** An agent plus the per-resource breakdown of its live access — what the agent detail /
+ * management page renders. The flat `scopes` from {@link AgentView} stays the effective union. */
+export interface AgentDetailView extends AgentView {
+  grants: AgentGrantView[]
+}
+
+/** Build the agent detail view: the agent, plus one entry per grant that still holds at least
+ * one live scope (expired-only grants read as no access, so they're dropped — matching the
+ * roster's "live access" framing). `resourceNames` maps a grant's `resourceId` to its label. */
+export function toAgentDetailView(
+  agent: Agent,
+  grants: readonly GrantWithScopes[],
+  resourceNames: Readonly<Record<string, string>>,
+  now: Date = new Date(),
+): AgentDetailView {
+  const isLive = (s: ScopeWithExpiry): boolean => s.expiresAt === null || s.expiresAt.getTime() > now.getTime()
+  return {
+    ...toAgentView(agent, grants),
+    grants: grants
+      .map((g) => ({
+        id: g.id,
+        resourceType: g.resourceType,
+        resourceId: g.resourceId,
+        resourceName: resourceNames[g.resourceId] ?? null,
+        scopes: g.scopes
+          .filter(isLive)
+          .map((s) => ({ scope: s.scope, expiresAt: s.expiresAt === null ? null : s.expiresAt.toISOString() })),
+      }))
+      .filter((g) => g.scopes.length > 0),
+  }
+}
+
 export interface BranchView {
   id: string
   name: string

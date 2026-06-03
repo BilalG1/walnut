@@ -5,6 +5,7 @@ export const keys = {
   orgProjects: (orgId: string) => ['orgs', orgId, 'projects'] as const,
   orgAgents: (orgId: string) => ['orgs', orgId, 'agents'] as const,
   orgRequests: (orgId: string, status: string) => ['orgs', orgId, 'requests', status] as const,
+  agent: (agentId: string) => ['agents', agentId] as const,
   project: (projectId: string) => ['projects', projectId] as const,
   branches: (projectId: string) => ['projects', projectId, 'branches'] as const,
   branch: (projectId: string, branch: string) => ['projects', projectId, 'branches', branch] as const,

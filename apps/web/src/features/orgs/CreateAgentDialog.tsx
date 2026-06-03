@@ -1,6 +1,6 @@
-import { Copy } from '@walnut/icons'
 import { Button, Dialog, Input } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
+import { ApiKeyReveal } from '../../components/ApiKeyReveal.tsx'
 import { useCreateAgent } from '../../data/queries.ts'
 import { saveAgentKey } from '../../lib/agentKeys.ts'
 
@@ -23,12 +23,10 @@ export function CreateAgentDialog({
   const create = useCreateAgent(orgId)
   const [name, setName] = useState('')
   const [created, setCreated] = useState<CreatedAgent | null>(null)
-  const [copied, setCopied] = useState(false)
 
   function close() {
     setName('')
     setCreated(null)
-    setCopied(false)
     create.reset()
     onClose()
   }
@@ -48,15 +46,6 @@ export function CreateAgentDialog({
         },
       },
     )
-  }
-
-  function copyKey() {
-    if (created === null) {
-      return
-    }
-    void navigator.clipboard.writeText(created.apiKey)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
   }
 
   return (
@@ -95,15 +84,7 @@ export function CreateAgentDialog({
             <span className="font-medium text-fg">{created.name}</span> is ready. Copy its API key now — it
             won&apos;t be shown again.
           </p>
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md border border-amber-500/30 bg-amber-500/10 dark:bg-amber-500/5 px-3 py-2 font-mono text-xs text-amber-700 dark:text-amber-200">
-              {created.apiKey}
-            </code>
-            <Button variant="ghost" onClick={copyKey}>
-              <Copy size={15} />
-              {copied ? 'Copied!' : 'Copy'}
-            </Button>
-          </div>
+          <ApiKeyReveal apiKey={created.apiKey} />
           <div className="flex justify-end pt-1">
             <Button onClick={close}>Done</Button>
           </div>
