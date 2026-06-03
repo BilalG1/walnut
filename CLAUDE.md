@@ -101,6 +101,18 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
   `POST /dev/auth/login` (dev-only, fails closed in prod). Frontend: `apps/web/src/auth`
   (Google/GitHub PKCE + dev-login). Projects get an inert `main` **branch** on creation
   (vocabulary for future branching; no per-branch DB/role yet).
+  - **To sign in for local testing / browser automation, just use the dev-login.** Don't
+    build a fake/throwaway auth server or stub the verifier — the real backend already
+    gives you a one-click sign-in. The running web app shows a small **"dev login" form
+    pinned top-left** (`DevLoginCorner` in `apps/web/src/auth/SignIn.tsx`, shown whenever
+    `import.meta.env.DEV`): type any email, submit, and you're instantly signed in with a
+    **genuine Hexclave session** (it POSTs `/dev/auth/login`, which mints real tokens). For
+    headless seeding, hit `POST <api>/dev/auth/login {email}` directly to get a real
+    `accessToken` and drive the API as that user (get-or-create by email, so reusing the
+    same email reuses the user). Requires the env from the repo-root `.env`
+    (`AUTH_DEV_BYPASS=1`, `HEXCLAVE_PROJECT_ID`, `HEXCLAVE_SECRET_SERVER_KEY`,
+    `VITE_HEXCLAVE_PROJECT_ID`) — **a git worktree has no `.env` of its own, so copy the
+    main checkout's `.env` into the worktree root** before `bun run dev`.
 - **Nothing is shipped — break things freely.** No users and no production data, so
   migrations, backwards compatibility, and deprecation shims are wasted effort. Reshape
   schemas, rename things, and change contracts directly; regenerate migrations from the
