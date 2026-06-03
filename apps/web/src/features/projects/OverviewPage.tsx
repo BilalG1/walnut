@@ -1,7 +1,7 @@
 import { Badge, Card } from '@walnut/ui'
 import { useScope } from '../../app/useScope.ts'
 import { PageContainer } from '../../components/layout/PageContainer.tsx'
-import { useProject } from '../../data/queries.ts'
+import { useBranches, useProject } from '../../data/queries.ts'
 
 /** Project/branch home. Minimal for now — activity + richer stats land in a later pass. */
 export function OverviewPage() {
@@ -14,6 +14,8 @@ export function OverviewPage() {
 
 function OverviewView({ projectId, branch }: { projectId: string; branch: string }) {
   const { data: project, error } = useProject(projectId)
+  const { data: branches } = useBranches(projectId)
+  const current = branches?.find((b) => b.name === branch)
   if (error !== null) {
     return (
       <PageContainer>
@@ -33,9 +35,9 @@ function OverviewView({ projectId, branch }: { projectId: string; branch: string
       </div>
       <p className="mt-1 text-sm text-subtle">This branch's database, activity and health.</p>
       <div className="mt-6 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Status" value={project?.status ?? '…'} />
+        <Stat label="Status" value={current?.status ?? project?.status ?? '…'} />
         <Stat label="Provider" value={project?.provider ?? '…'} />
-        <Stat label="Region" value={project?.region ?? '—'} />
+        <Stat label="Region" value={current?.region ?? '—'} />
         <Stat label="Branch" value={branch} />
       </div>
     </PageContainer>

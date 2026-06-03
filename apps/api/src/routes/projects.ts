@@ -3,7 +3,14 @@ import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import { toActivityEventView, toBranchView, toProjectDetail, toProjectSummary } from '../serializers.ts'
 import { listProjectActivity } from '../services/activity.ts'
-import { createProject, deleteProject, getProject, listBranches, listProjects } from '../services/projects.ts'
+import {
+  createProject,
+  deleteProject,
+  getDefaultBranch,
+  getProject,
+  listBranches,
+  listProjects,
+} from '../services/projects.ts'
 import { runReadOnlyQuery } from '../services/query.ts'
 
 const nameSchema = t.String({ minLength: 1, maxLength: 64 })
@@ -21,10 +28,18 @@ export function projectRoutes(ctx: AppContext) {
     })
     .post(
       '/',
-      async ({ userId, body }) => toProjectDetail(await createProject(ctx, userId, body)),
+      async ({ userId, body }) => {
+        const project = await createProject(ctx, userId, body)
+        const main = await getDefaultBranch(ctx, project.id)
+        return toProjectDetail(project, main.connectionUri)
+      },
       { body: t.Object({ name: nameSchema }) },
     )
-    .get('/:id', async ({ userId, params }) => toProjectDetail(await getProject(ctx, params.id, userId)))
+    .get('/:id', async ({ userId, params }) => {
+      const project = await getProject(ctx, params.id, userId)
+      const main = await getDefaultBranch(ctx, project.id)
+      return toProjectDetail(project, main.connectionUri)
+    })
     .delete('/:id', async ({ userId, params }) => {
       await deleteProject(ctx, params.id, userId)
       return { deleted: true }
@@ -45,8 +60,10 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/sql',
       async ({ userId, params, body }) => {
-        const project = await getProject(ctx, params.id, userId)
-        return runReadOnlyQuery(project, body.sql, body.params ?? [])
+        // Membership check, then run over the default branch's database (the one the viewer shows).
+        await getProject(ctx, params.id, userId)
+        const main = await getDefaultBranch(ctx, params.id)
+        return runReadOnlyQuery(main, body.sql, body.params ?? [])
       },
       {
         body: t.Object({

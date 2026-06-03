@@ -11,7 +11,7 @@ import {
 } from '../serializers.ts'
 import { createAgent, listOrgAgents } from '../services/agents.ts'
 import { listOrganizations } from '../services/organizations.ts'
-import { createProject, listOrgProjects } from '../services/projects.ts'
+import { createProject, getDefaultBranch, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
 
 export function organizationRoutes(ctx: AppContext) {
@@ -37,7 +37,11 @@ export function organizationRoutes(ctx: AppContext) {
     })
     .post(
       '/:orgId/projects',
-      async ({ userId, params, body }) => toProjectDetail(await createProject(ctx, userId, body, params.orgId)),
+      async ({ userId, params, body }) => {
+        const project = await createProject(ctx, userId, body, params.orgId)
+        const main = await getDefaultBranch(ctx, project.id)
+        return toProjectDetail(project, main.connectionUri)
+      },
       { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
     )
     .get('/:orgId/agents', async ({ userId, params }) => {

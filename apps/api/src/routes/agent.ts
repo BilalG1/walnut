@@ -5,7 +5,7 @@ import { HttpError, unauthorized } from '../errors.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
 import { findAgentByKey, getAgentGrant, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
-import { branchExists, listProjectsInOrg } from '../services/projects.ts'
+import { listProjectsInOrg, resolveBranch } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
 
@@ -44,19 +44,15 @@ export function agentApiRoutes(ctx: AppContext) {
     .post(
       '/query',
       async ({ agent, body }) => {
-        // Pick the target project (explicit, or the agent's sole granted project) and run
-        // over its scoped grant — defense in depth behind the SQL classifier.
+        // Pick the target project (explicit, or the agent's sole granted project) and the
+        // target branch (named, or the default), then run over that branch's scoped connection
+        // for the grant's scopes — defense in depth behind the SQL classifier.
         const project = await resolveAgentProject(ctx, agent, body.projectId)
-        if (body.branch !== undefined && !(await branchExists(ctx, project.id, body.branch))) {
-          throw new HttpError(404, {
-            error: 'branch_not_found',
-            message: `No branch "${body.branch}" on this project.`,
-          })
-        }
+        const branch = await resolveBranch(ctx, project.id, body.branch)
         const grant = await getAgentGrant(ctx, agent.id, 'project', project.id)
         const startedAt = Date.now()
         try {
-          const result = await runAgentQuery(ctx, project, grant ?? null, body.sql)
+          const result = await runAgentQuery(ctx, branch, grant ?? null, body.sql)
           await recordQueryEvent(ctx, {
             agentId: agent.id,
             projectId: project.id,

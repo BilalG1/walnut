@@ -22,10 +22,13 @@ export { SYSTEM_USER_ID, newId, newAgentKey, hashKey, keyPrefix, newDatabaseName
 
 export { createProvider } from './provider/index.ts'
 export type {
+  CreateBranchInput,
   DatabaseProvider,
+  DestroyBranchInput,
   ProviderConfig,
   ProviderKind,
   ProvisionedDatabase,
+  ProvisionedProject,
 } from './provider/index.ts'
 
 export { runSql } from './query.ts'

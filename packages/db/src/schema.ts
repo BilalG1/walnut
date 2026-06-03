@@ -64,23 +64,21 @@ export const projects = pgTable('projects', {
     .references(() => organizations.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   provider: text('provider').$type<ProviderKind>().notNull(),
-  /** Provider-side id used to destroy the database (Neon project id or local db name). */
+  /** The provider-side *container* id (a Neon project). Null for flat providers (local) that
+   * have no container — there the databases live on the branches and are torn down one by one. */
   providerProjectId: text('provider_project_id'),
-  /** Connection string for the provisioned database. Null until provisioning completes. */
-  connectionUri: text('connection_uri'),
-  region: text('region'),
+  /** Coarse provisioning status of the project as a whole. Each branch carries its own
+   * database + status (a project is a container of branches); this tracks the create flow. */
   status: text('status').$type<ProjectStatus>().notNull().default('provisioning'),
   error: text('error'),
   createdAt,
 })
 
 /**
- * A line of a project's database. Every project gets one `main` branch on creation.
- * Today this is inert metadata pointing at the project's single database — the
- * `main` branch IS that database. Real branching (per-branch provisioned databases,
- * agents scoped to a branch) lands later; this table reserves the vocabulary so the
- * provider/role layer doesn't have to assume "one database per project forever"
- * (see CLAUDE.md). No DB/role identity hangs off it yet.
+ * A branch of a project — and the unit that owns a database. Every project gets one `main`
+ * branch on creation; further branches are copy-on-write clones (Neon) / `TEMPLATE` copies
+ * (local) of a parent. Each branch has its own provisioned database with its own connection
+ * and scoped roles, so agents are granted (and queries run) against a specific branch.
  */
 export const branches = pgTable(
   'branches',
@@ -92,6 +90,13 @@ export const branches = pgTable(
     name: text('name').notNull(),
     /** The branch a new agent/connection targets by default (the `main` branch). */
     isDefault: boolean('is_default').notNull().default(false),
+    /** Provider-side id used to destroy this branch's database (Neon branch id / local db name). */
+    providerBranchId: text('provider_branch_id'),
+    /** Owner connection string for this branch's database. Null until provisioning completes. */
+    connectionUri: text('connection_uri'),
+    region: text('region'),
+    status: text('status').$type<ProjectStatus>().notNull().default('provisioning'),
+    error: text('error'),
     createdAt,
   },
   (t) => [unique('branches_project_name_unique').on(t.projectId, t.name)],
@@ -117,8 +122,8 @@ export const agents = pgTable('agents', {
  * What an agent can do, and where — pure policy. Each grant binds an agent to one resource
  * node (an org, project, or branch) with a set of scopes; one agent can hold many grants, one
  * per resource it has been granted access to. Enforcement is decoupled: a query computes the
- * agent's effective scopes from its grants, then runs over the database's *shared* scoped role
- * for that scope set (see `project_db_roles`). So a grant never owns a Postgres role —
+ * agent's effective scopes from its grants, then runs over the branch database's *shared* scoped
+ * role for that scope set (see `branch_db_roles`). So a grant never owns a Postgres role —
  * approval/denial/expiry are metadata writes, and the engine picks the matching connection.
  */
 export const agentGrants = pgTable(
@@ -139,21 +144,22 @@ export const agentGrants = pgTable(
 )
 
 /**
- * The shared, per-database scoped Postgres roles, keyed by scope set. Enforcement is by scope
- * set, not by agent: for each combination of database scopes actually used on a project we
+ * The shared, per-branch-database scoped Postgres roles, keyed by scope set. Enforcement is by
+ * scope set, not by agent: for each combination of database scopes actually used on a branch we
  * provision one `LOGIN` role (member of exactly the matching group roles) and store its scoped
- * connection here. Any agent whose effective scopes collapse to that set runs its queries over
- * this connection — so there are at most 2⁴ = 16 roles per database, created lazily on first
- * use, and a scope change is just "select a different row". `scopeKey` is the canonical bitmask
- * (see `scopeSetKey`); the row is cluster-global state cached here so we never re-create a role.
+ * connection here. Any agent whose effective scopes on that branch collapse to that set runs its
+ * queries over this connection — so there are at most 2⁴ = 16 roles per branch database, created
+ * lazily on first use, and a scope change is just "select a different row". `scopeKey` is the
+ * canonical bitmask (see `scopeSetKey`); the row caches the (otherwise re-creatable) role so we
+ * never provision it twice.
  */
-export const projectDbRoles = pgTable(
-  'project_db_roles',
+export const branchDbRoles = pgTable(
+  'branch_db_roles',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    projectId: uuid('project_id')
+    branchId: uuid('branch_id')
       .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
+      .references(() => branches.id, { onDelete: 'cascade' }),
     /** Canonical key for the scope set this role grants (`scopeSetKey`). */
     scopeKey: text('scope_key').notNull(),
     /** The Postgres role name (`<dbprefix>_s<mask>`). */
@@ -162,7 +168,7 @@ export const projectDbRoles = pgTable(
     connectionUri: text('connection_uri').notNull(),
     createdAt,
   },
-  (t) => [unique('project_db_roles_project_scope_unique').on(t.projectId, t.scopeKey)],
+  (t) => [unique('branch_db_roles_branch_scope_unique').on(t.branchId, t.scopeKey)],
 )
 
 /**
@@ -253,8 +259,8 @@ export type Agent = typeof agents.$inferSelect
 export type NewAgent = typeof agents.$inferInsert
 export type AgentGrant = typeof agentGrants.$inferSelect
 export type NewAgentGrant = typeof agentGrants.$inferInsert
-export type ProjectDbRole = typeof projectDbRoles.$inferSelect
-export type NewProjectDbRole = typeof projectDbRoles.$inferInsert
+export type BranchDbRole = typeof branchDbRoles.$inferSelect
+export type NewBranchDbRole = typeof branchDbRoles.$inferInsert
 export type AgentGrantScope = typeof agentGrantScopes.$inferSelect
 export type NewAgentGrantScope = typeof agentGrantScopes.$inferInsert
 export type ScopeRequest = typeof scopeRequests.$inferSelect

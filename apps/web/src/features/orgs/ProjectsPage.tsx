@@ -62,7 +62,7 @@ function ProjectsView({ orgId }: { orgId: string }) {
                   </div>
                   <div className="mt-1 text-xs text-subtle">
                     {p.provider}
-                    {p.region !== null ? ` · ${p.region}` : ''}
+                    {p.defaultBranch !== null ? ` · ${p.defaultBranch}` : ''}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-subtle">
                     <span>{p.agentCount} agents</span>

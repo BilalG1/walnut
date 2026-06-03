@@ -12,10 +12,12 @@ import {
   agentGrants,
   agentGrantScopes,
   agents,
-  projectDbRoles,
+  branchDbRoles,
+  branches,
   projects,
   type Agent,
   type AgentGrant,
+  type Branch,
   type GrantResourceType,
   type Project,
 } from '@walnut/db'
@@ -347,55 +349,56 @@ export async function grantScopes(
 
 /**
  * The connection an agent's query should run over, given its current *effective* scopes on a
- * project's database. Enforcement is by scope set, not by agent: this resolves (lazily
- * provisioning on first use) the shared scoped role for that set and returns its connection.
+ * branch's database. Enforcement is by scope set, not by agent: this resolves (lazily
+ * provisioning on first use) the shared scoped role for that set on that branch and returns its
+ * connection.
  *
  * Returns `null` when there's nothing to run as — no database scopes in the set (`scopeKey`
- * `'0'`), or the project has no connection yet. Fast path: a cached `project_db_roles` row for
- * the scope set returns immediately. Slow path: under a row lock on the project (so concurrent
+ * `'0'`), or the branch has no connection yet. Fast path: a cached `branch_db_roles` row for
+ * the scope set returns immediately. Slow path: under a row lock on the branch (so concurrent
  * first-uses of the same set don't double-provision), re-check, then {@link ensureScopeRole}
  * and cache the row. The role itself is idempotent, so this is safe to retry.
  */
 export async function connectionForScopes(
   ctx: AppContext,
-  project: Project,
+  branch: Branch,
   scopes: readonly AgentScope[],
 ): Promise<string | null> {
   const key = scopeSetKey(scopes)
-  const ownerUri = project.connectionUri
+  const ownerUri = branch.connectionUri
   if (key === '0' || ownerUri === null) {
     return null
   }
   const [existing] = await ctx.db
-    .select({ connectionUri: projectDbRoles.connectionUri })
-    .from(projectDbRoles)
-    .where(and(eq(projectDbRoles.projectId, project.id), eq(projectDbRoles.scopeKey, key)))
+    .select({ connectionUri: branchDbRoles.connectionUri })
+    .from(branchDbRoles)
+    .where(and(eq(branchDbRoles.branchId, branch.id), eq(branchDbRoles.scopeKey, key)))
     .limit(1)
   if (existing !== undefined) {
     return existing.connectionUri
   }
 
   return ctx.db.transaction(async (tx) => {
-    // Lock the project row so two concurrent first-uses of this scope set serialize; the loser
+    // Lock the branch row so two concurrent first-uses of this scope set serialize; the loser
     // sees the winner's cached row on re-check rather than provisioning a second time.
-    await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).for('update')
+    await tx.select({ id: branches.id }).from(branches).where(eq(branches.id, branch.id)).for('update')
     const [again] = await tx
-      .select({ connectionUri: projectDbRoles.connectionUri })
-      .from(projectDbRoles)
-      .where(and(eq(projectDbRoles.projectId, project.id), eq(projectDbRoles.scopeKey, key)))
+      .select({ connectionUri: branchDbRoles.connectionUri })
+      .from(branchDbRoles)
+      .where(and(eq(branchDbRoles.branchId, branch.id), eq(branchDbRoles.scopeKey, key)))
       .limit(1)
     if (again !== undefined) {
       return again.connectionUri
     }
     const { role, connectionUri } = await ensureScopeRole(ownerUri, scopes)
     await tx
-      .insert(projectDbRoles)
-      .values({ projectId: project.id, scopeKey: key, dbRole: role, connectionUri })
-      .onConflictDoNothing({ target: [projectDbRoles.projectId, projectDbRoles.scopeKey] })
+      .insert(branchDbRoles)
+      .values({ branchId: branch.id, scopeKey: key, dbRole: role, connectionUri })
+      .onConflictDoNothing({ target: [branchDbRoles.branchId, branchDbRoles.scopeKey] })
     const [stored] = await tx
-      .select({ connectionUri: projectDbRoles.connectionUri })
-      .from(projectDbRoles)
-      .where(and(eq(projectDbRoles.projectId, project.id), eq(projectDbRoles.scopeKey, key)))
+      .select({ connectionUri: branchDbRoles.connectionUri })
+      .from(branchDbRoles)
+      .where(and(eq(branchDbRoles.branchId, branch.id), eq(branchDbRoles.scopeKey, key)))
       .limit(1)
     return stored?.connectionUri ?? connectionUri
   })

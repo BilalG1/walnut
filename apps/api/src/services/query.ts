@@ -7,7 +7,7 @@ import {
   runSql,
   SCOPE_DESCRIPTIONS,
 } from '@walnut/core'
-import type { Project } from '@walnut/db'
+import type { Branch } from '@walnut/db'
 import type { AppContext } from '../context.ts'
 import { HttpError } from '../errors.ts'
 import { connectionForScopes, type GrantWithScopes } from './agents.ts'
@@ -31,14 +31,14 @@ export interface AgentQueryResult extends QueryResult {
  */
 export async function runAgentQuery(
   ctx: AppContext,
-  project: Project,
+  branch: Branch,
   grant: GrantWithScopes | null,
   sql: string,
 ): Promise<AgentQueryResult> {
-  if (project.status !== 'active' || project.connectionUri === null) {
+  if (branch.status !== 'active' || branch.connectionUri === null) {
     throw new HttpError(409, {
-      error: 'project_not_ready',
-      message: `Project is "${project.status}"; its database is not ready for queries yet.`,
+      error: 'branch_not_ready',
+      message: `Branch "${branch.name}" is "${branch.status}"; its database is not ready for queries yet.`,
     })
   }
 
@@ -66,8 +66,8 @@ export async function runAgentQuery(
   }
 
   // Authorised by the metadata DB. Run over the shared scoped connection for the effective
-  // scope set, provisioning that role lazily on first use.
-  const connectionUri = await connectionForScopes(ctx, project, granted)
+  // scope set on this branch, provisioning that role lazily on first use.
+  const connectionUri = await connectionForScopes(ctx, branch, granted)
   if (connectionUri === null) {
     // Fail closed: a scoped query must never fall back to the owner (superuser) connection.
     throw new HttpError(500, { error: 'internal_error', message: 'No scoped connection provisioned for query.' })
@@ -89,17 +89,17 @@ export async function runAgentQuery(
 const VIEWER_SCOPES: readonly AgentScope[] = ['db:read']
 
 /**
- * Run a parameterized, **read-only** query for the dashboard data viewer over the project's
- * owner connection. The same SQL classifier that guards agents gates this to `db:read`, so the
- * viewer (and its raw-query escape hatch) can never mutate data even though it runs as the
- * owner. This backs `POST /api/projects/:id/sql`, which the `@walnut/db-viewer` Postgres adapter
- * targets from the browser.
+ * Run a parameterized, **read-only** query for the dashboard data viewer over a branch's owner
+ * connection. The same SQL classifier that guards agents gates this to `db:read`, so the viewer
+ * (and its raw-query escape hatch) can never mutate data even though it runs as the owner. This
+ * backs `POST /api/projects/:id/sql`, which the `@walnut/db-viewer` Postgres adapter targets
+ * from the browser.
  */
-export async function runReadOnlyQuery(project: Project, sql: string, params: unknown[]): Promise<QueryResult> {
-  if (project.status !== 'active' || project.connectionUri === null) {
+export async function runReadOnlyQuery(branch: Branch, sql: string, params: unknown[]): Promise<QueryResult> {
+  if (branch.status !== 'active' || branch.connectionUri === null) {
     throw new HttpError(409, {
-      error: 'project_not_ready',
-      message: `Project is "${project.status}"; its database is not ready for queries yet.`,
+      error: 'branch_not_ready',
+      message: `Branch "${branch.name}" is "${branch.status}"; its database is not ready for queries yet.`,
     })
   }
 
@@ -121,7 +121,7 @@ export async function runReadOnlyQuery(project: Project, sql: string, params: un
     // readOnly is the engine-level backstop behind the classifier: the connection runs with
     // default_transaction_read_only, so even a side-effecting function the classifier waved
     // through as db:read (e.g. nextval()) is refused.
-    return await runSql(project.connectionUri, sql, params, { readOnly: true })
+    return await runSql(branch.connectionUri, sql, params, { readOnly: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Query failed'
     throw new HttpError(400, { error: 'query_error', message })

@@ -1,4 +1,4 @@
-import { type ProvisionedDatabase, setupProjectRoles } from '@walnut/core'
+import { type ProvisionedProject, setupProjectRoles } from '@walnut/core'
 import { agentGrants, branches, organizationMembers, projects, scopeRequests, type Branch, type Project } from '@walnut/db'
 import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
@@ -85,14 +85,35 @@ export async function listProjectsInOrg(ctx: AppContext, orgId: string): Promise
   return ctx.db.select().from(projects).where(eq(projects.organizationId, orgId)).orderBy(desc(projects.createdAt))
 }
 
-/** Whether a branch of the given name exists on a project. */
-export async function branchExists(ctx: AppContext, projectId: string, name: string): Promise<boolean> {
+/** A project's default (`main`) branch. Throws if the project has none (shouldn't happen —
+ * every project is created with one). */
+export async function getDefaultBranch(ctx: AppContext, projectId: string): Promise<Branch> {
   const [row] = await ctx.db
-    .select({ id: branches.id })
+    .select()
+    .from(branches)
+    .where(and(eq(branches.projectId, projectId), eq(branches.isDefault, true)))
+    .limit(1)
+  if (row === undefined) {
+    throw notFound('Branch')
+  }
+  return row
+}
+
+/** Resolve a query/grant target branch: the named branch, or the project's default when no
+ * name is given. A named branch that doesn't exist is a clear 404 the agent can act on. */
+export async function resolveBranch(ctx: AppContext, projectId: string, name?: string): Promise<Branch> {
+  if (name === undefined) {
+    return getDefaultBranch(ctx, projectId)
+  }
+  const [row] = await ctx.db
+    .select()
     .from(branches)
     .where(and(eq(branches.projectId, projectId), eq(branches.name, name)))
     .limit(1)
-  return row !== undefined
+  if (row === undefined) {
+    throw new HttpError(404, { error: 'branch_not_found', message: `No branch "${name}" on this project.` })
+  }
+  return row
 }
 
 /** A project's branches (caller must be a member of its org). Default branch first. */
@@ -155,37 +176,50 @@ export async function createProject(
     throw new HttpError(500, { error: 'internal_error', message: 'Failed to create project.' })
   }
 
-  // Every project starts with a `main` branch. Inert metadata today (it *is* the
-  // project's database); real per-branch databases land later.
-  await ctx.db.insert(branches).values({ projectId: created.id, name: 'main', isDefault: true })
+  // Every project starts with a `main` branch — the branch *is* the database, so it carries
+  // the connection/roles. It starts provisioning and flips to active alongside the project.
+  const [mainBranch] = await ctx.db
+    .insert(branches)
+    .values({ projectId: created.id, name: 'main', isDefault: true, status: 'provisioning' })
+    .returning()
+  if (mainBranch === undefined) {
+    throw new HttpError(500, { error: 'internal_error', message: 'Failed to create main branch.' })
+  }
 
-  let provisioned: ProvisionedDatabase | undefined
+  let provisioned: ProvisionedProject | undefined
   try {
-    provisioned = await ctx.provider.provision({ name: input.name })
-    // Establish the per-scope group roles before the database is used, so every
-    // agent connection is enforced by the engine and not just the SQL classifier.
-    await setupProjectRoles(provisioned.connectionUri)
-    const [updated] = await ctx.db
-      .update(projects)
+    provisioned = await ctx.provider.provisionProject({ name: input.name })
+    const { defaultBranch } = provisioned
+    // Establish the per-scope group roles before the database is used, so every agent
+    // connection is enforced by the engine and not just the SQL classifier.
+    await setupProjectRoles(defaultBranch.connectionUri)
+    await ctx.db
+      .update(branches)
       .set({
         status: 'active',
-        providerProjectId: provisioned.providerProjectId,
-        connectionUri: provisioned.connectionUri,
-        region: provisioned.region,
+        providerBranchId: defaultBranch.providerBranchId,
+        connectionUri: defaultBranch.connectionUri,
+        region: defaultBranch.region,
       })
+      .where(eq(branches.id, mainBranch.id))
+    const [updated] = await ctx.db
+      .update(projects)
+      .set({ status: 'active', providerProjectId: provisioned.providerProjectId })
       .where(eq(projects.id, created.id))
       .returning()
     return updated ?? created
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown provisioning error'
-    // If the database was created but a later step failed, tear it down so we don't
-    // leak an orphaned database (its metadata row never records providerProjectId).
+    // If the database was created but a later step failed, tear it down so we don't leak an
+    // orphaned database. A container provider (Neon) is torn down whole; a flat provider (local)
+    // by its branch database.
     if (provisioned !== undefined) {
-      await ctx.provider
-        .destroy(provisioned.providerProjectId)
-        .catch((e) => console.error(`Failed to clean up orphaned database for project ${created.id}:`, e))
+      await teardownProvider(ctx, provisioned.providerProjectId, [provisioned.defaultBranch.providerBranchId]).catch(
+        (e) => console.error(`Failed to clean up orphaned database for project ${created.id}:`, e),
+      )
     }
     await ctx.db.update(projects).set({ status: 'error', error: message }).where(eq(projects.id, created.id))
+    await ctx.db.update(branches).set({ status: 'error', error: message }).where(eq(branches.id, mainBranch.id))
     throw new HttpError(502, {
       error: 'provisioning_failed',
       message: `Failed to provision database: ${message}`,
@@ -193,20 +227,51 @@ export async function createProject(
   }
 }
 
+/**
+ * Tear down a project's provider-side databases. A container provider (Neon, `providerProjectId`
+ * set) is destroyed whole — one call removes every branch. A flat provider (local) has no
+ * container, so each branch database is destroyed individually. `branchIds` are the provider
+ * branch ids to drop in the flat case (ignored when there's a container).
+ */
+async function teardownProvider(
+  ctx: AppContext,
+  providerProjectId: string | null,
+  branchProviderIds: readonly (string | null)[],
+): Promise<void> {
+  if (providerProjectId !== null) {
+    await ctx.provider.destroyProject(providerProjectId)
+    return
+  }
+  for (const providerBranchId of branchProviderIds) {
+    if (providerBranchId === null) {
+      continue
+    }
+    // Sequential by design: one branch teardown at a time over the admin connection.
+    // eslint-disable-next-line no-await-in-loop
+    await ctx.provider.destroyBranch({ providerProjectId, providerBranchId })
+  }
+}
+
 export async function deleteProject(ctx: AppContext, id: string, userId: string): Promise<void> {
   const project = await getProject(ctx, id, userId)
-  if (project.providerProjectId !== null) {
-    try {
-      await ctx.provider.destroy(project.providerProjectId)
-    } catch (err) {
-      // Best-effort: drop the metadata row even if the provider teardown fails.
-      console.error(`Failed to destroy provider database for project ${id}:`, err)
-    }
+  const projBranches = await ctx.db
+    .select({ id: branches.id, providerBranchId: branches.providerBranchId })
+    .from(branches)
+    .where(eq(branches.projectId, id))
+  try {
+    await teardownProvider(
+      ctx,
+      project.providerProjectId,
+      projBranches.map((b) => b.providerBranchId),
+    )
+  } catch (err) {
+    // Best-effort: drop the metadata rows even if the provider teardown fails.
+    console.error(`Failed to destroy provider databases for project ${id}:`, err)
   }
   // agent_grants / scope_requests reference resources polymorphically (no FK cascade), so
   // clear the rows anchored to this project and its branches before dropping it. Agents are
-  // org-scoped and survive — they simply lose their access to this project.
-  const projBranches = await ctx.db.select({ id: branches.id }).from(branches).where(eq(branches.projectId, id))
+  // org-scoped and survive — they simply lose their access to this project. (branch_db_roles
+  // rows cascade with the branches.)
   const branchIds = projBranches.map((b) => b.id)
   await ctx.db
     .delete(agentGrants)

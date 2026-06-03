@@ -25,7 +25,6 @@ export interface ProjectSummary {
   id: string
   name: string
   provider: string
-  region: string | null
   status: string
   error: string | null
   createdAt: string
@@ -68,15 +67,16 @@ export function toProjectSummary(p: Project): ProjectSummary {
     id: p.id,
     name: p.name,
     provider: p.provider,
-    region: p.region,
     status: p.status,
     error: p.error,
     createdAt: p.createdAt.toISOString(),
   }
 }
 
-export function toProjectDetail(p: Project): ProjectDetail {
-  return { ...toProjectSummary(p), connectionUri: p.connectionUri }
+/** Project detail plus the owner connection of its default branch (the database the dashboard
+ * data viewer and "Connection" panel point at). `connectionUri` is null until provisioned. */
+export function toProjectDetail(p: Project, connectionUri: string | null): ProjectDetail {
+  return { ...toProjectSummary(p), connectionUri }
 }
 
 /** An agent's effective scopes: the deduplicated union of its non-expired scopes across
@@ -192,11 +192,20 @@ export interface BranchView {
   id: string
   name: string
   isDefault: boolean
+  status: string
+  region: string | null
   createdAt: string
 }
 
 export function toBranchView(b: Branch): BranchView {
-  return { id: b.id, name: b.name, isDefault: b.isDefault, createdAt: b.createdAt.toISOString() }
+  return {
+    id: b.id,
+    name: b.name,
+    isDefault: b.isDefault,
+    status: b.status,
+    region: b.region,
+    createdAt: b.createdAt.toISOString(),
+  }
 }
 
 /** One agent query attempt, as shown in the project activity feed. */

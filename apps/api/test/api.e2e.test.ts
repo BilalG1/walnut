@@ -4,10 +4,10 @@ import { runSql, scopeSetKey, SYSTEM_USER_ID } from '@walnut/core'
 import {
   agentGrants,
   agentGrantScopes,
+  branchDbRoles,
   branches,
   organizationMembers,
   organizations,
-  projectDbRoles,
 } from '@walnut/db'
 import { and, eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
@@ -110,6 +110,35 @@ describe('projects', () => {
     const after = await h.api.api.projects({ id: project.id }).get()
     expect(after.status).toBe(404)
   })
+
+  test('deleting a project drops its branch databases and their cluster-global roles', async () => {
+    const project = await newProject('teardown')
+    const agent = await newAgent('teardown-bot')
+    await grant(agent.apiKey, project.id, ['db:read'])
+    // A query provisions a scope role on the main branch's database, on top of its group roles.
+    await h.api.agent.v1.query.post({ sql: 'SELECT 1' }, { headers: bearer(agent.apiKey) })
+
+    const [main] = await h.ctx.db
+      .select()
+      .from(branches)
+      .where(and(eq(branches.projectId, project.id), eq(branches.isDefault, true)))
+    const dbName = main?.providerBranchId ?? ''
+    const ownerUri = main?.connectionUri ?? ''
+    // Reach the cluster over a neutral database to inspect catalogs after the branch db is dropped.
+    const adminUri = new URL(ownerUri)
+    adminUri.pathname = '/postgres'
+    const admin = adminUri.toString()
+
+    const before = await runSql(admin, 'SELECT 1 FROM pg_database WHERE datname = $1', [dbName])
+    expect(before.rows.length).toBe(1)
+
+    await h.api.api.projects({ id: project.id }).delete()
+
+    const dbGone = await runSql(admin, 'SELECT 1 FROM pg_database WHERE datname = $1', [dbName])
+    expect(dbGone.rows.length).toBe(0)
+    const rolesGone = await runSql(admin, 'SELECT rolname FROM pg_roles WHERE rolname LIKE $1', [`${dbName}\\_%`])
+    expect(rolesGone.rows.length).toBe(0)
+  }, 20_000)
 })
 
 describe('agents', () => {
@@ -166,14 +195,18 @@ describe('agents', () => {
     const scopeRows = await h.ctx.db.select().from(agentGrantScopes).where(eq(agentGrantScopes.grantId, g?.id ?? ''))
     expect(scopeRows.map((r) => r.scope).toSorted()).toEqual(['db:read', 'db:write'])
     expect(scopeRows.every((r) => r.expiresAt === null)).toBe(true)
-    // No shared scope role exists yet for this project — it's provisioned on first use.
-    const before = await h.ctx.db.select().from(projectDbRoles).where(eq(projectDbRoles.projectId, project.id))
+    // No shared scope role exists yet on the main branch — it's provisioned on first use.
+    const [main] = await h.ctx.db
+      .select()
+      .from(branches)
+      .where(and(eq(branches.projectId, project.id), eq(branches.isDefault, true)))
+    const before = await h.ctx.db.select().from(branchDbRoles).where(eq(branchDbRoles.branchId, main?.id ?? ''))
     expect(before.length).toBe(0)
 
     // The first query provisions the shared scope role for the {read,write} set and caches it.
     const ran = await h.api.agent.v1.query.post({ sql: 'SELECT 1 AS n' }, { headers: bearer(agent.apiKey) })
     expect(ran.status).toBe(200)
-    const after = await h.ctx.db.select().from(projectDbRoles).where(eq(projectDbRoles.projectId, project.id))
+    const after = await h.ctx.db.select().from(branchDbRoles).where(eq(branchDbRoles.branchId, main?.id ?? ''))
     expect(after.length).toBe(1)
     expect(after[0]?.scopeKey).toBe(scopeSetKey(['db:read', 'db:write']))
     expect(after[0]?.connectionUri ?? '').toContain('postgres')
@@ -1125,6 +1158,18 @@ describe('branches', () => {
     expect(res.data?.length).toBe(1)
     expect(res.data?.[0]?.name).toBe('main')
     expect(res.data?.[0]?.isDefault).toBe(true)
+    expect(res.data?.[0]?.status).toBe('active')
+  })
+
+  test('the main branch owns its own provisioned database (identity lives on the branch)', async () => {
+    const project = await newProject('branchy-db')
+    const [main] = await h.ctx.db
+      .select()
+      .from(branches)
+      .where(and(eq(branches.projectId, project.id), eq(branches.isDefault, true)))
+    expect(main?.status).toBe('active')
+    expect(main?.connectionUri ?? '').toContain('postgres')
+    expect(typeof main?.providerBranchId).toBe('string')
   })
 
   test('branches of an inaccessible project are 404', async () => {

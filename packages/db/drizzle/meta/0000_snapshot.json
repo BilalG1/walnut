@@ -1,5 +1,5 @@
 {
-  "id": "237ad502-36c2-47b6-9e87-d816148b6463",
+  "id": "02912fef-c0fc-4b2a-8687-9b2b778d04f5",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -214,6 +214,80 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.branch_db_roles": {
+      "name": "branch_db_roles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope_key": {
+          "name": "scope_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "db_role": {
+          "name": "db_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_uri": {
+          "name": "connection_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "branch_db_roles_branch_id_branches_id_fk": {
+          "name": "branch_db_roles_branch_id_branches_id_fk",
+          "tableFrom": "branch_db_roles",
+          "tableTo": "branches",
+          "columnsFrom": [
+            "branch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "branch_db_roles_branch_scope_unique": {
+          "name": "branch_db_roles_branch_scope_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "branch_id",
+            "scope_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.branches": {
       "name": "branches",
       "schema": "",
@@ -243,6 +317,37 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "provider_branch_id": {
+          "name": "provider_branch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "connection_uri": {
+          "name": "connection_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "region": {
+          "name": "region",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'provisioning'"
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -425,80 +530,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.project_db_roles": {
-      "name": "project_db_roles",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scope_key": {
-          "name": "scope_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "db_role": {
-          "name": "db_role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "connection_uri": {
-          "name": "connection_uri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "project_db_roles_project_id_projects_id_fk": {
-          "name": "project_db_roles_project_id_projects_id_fk",
-          "tableFrom": "project_db_roles",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "project_db_roles_project_scope_unique": {
-          "name": "project_db_roles_project_scope_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "project_id",
-            "scope_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.projects": {
       "name": "projects",
       "schema": "",
@@ -530,18 +561,6 @@
         },
         "provider_project_id": {
           "name": "provider_project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "connection_uri": {
-          "name": "connection_uri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "region": {
-          "name": "region",
           "type": "text",
           "primaryKey": false,
           "notNull": false

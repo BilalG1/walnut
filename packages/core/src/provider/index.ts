@@ -2,7 +2,14 @@ import { createLocalProvider } from './local.ts'
 import { createNeonProvider } from './neon.ts'
 import type { DatabaseProvider, ProviderKind } from './types.ts'
 
-export type { DatabaseProvider, ProviderKind, ProvisionedDatabase } from './types.ts'
+export type {
+  CreateBranchInput,
+  DatabaseProvider,
+  DestroyBranchInput,
+  ProviderKind,
+  ProvisionedDatabase,
+  ProvisionedProject,
+} from './types.ts'
 
 export interface ProviderConfig {
   kind: ProviderKind
