@@ -45,6 +45,16 @@
         "typescript/no-explicit-any": "off",
         "unicorn/consistent-function-scoping": "off"
       }
+    },
+    {
+      // react/exhaustive-deps is already on via `correctness`, but rules-of-hooks is not — enable
+      // it. Scoped to apps/web (the only React package): the rule flags any `use*` call outside a
+      // component, so repo-wide it false-positives on the `useHarness()` test lifecycle helper in
+      // apps/api/test.
+      "files": ["apps/web/**/*.ts", "apps/web/**/*.tsx"],
+      "rules": {
+        "react/rules-of-hooks": "error"
+      }
     }
   ]
 }
