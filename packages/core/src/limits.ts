@@ -29,7 +29,7 @@
 export const RESOURCE_LIMITS = {
   /** Neon projects per org. Each is a whole Neon project container, and Neon accounts
    * cap total projects — so this guards a shared account quota, not just cost. */
-  projectsPerOrg: 10,
+  projectsPerOrg: 5,
   /** Branches per project. Each branch provisions a Neon compute endpoint — the
    * headline cost surface. */
   branchesPerProject: 10,
