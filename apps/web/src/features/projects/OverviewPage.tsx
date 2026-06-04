@@ -13,17 +13,11 @@ export function OverviewPage() {
 }
 
 function OverviewView({ projectId, branch }: { projectId: string; branch: string }) {
-  const { data: project, error } = useProject(projectId)
+  // Scope validity (project exists, branch exists) is guaranteed by the layout's ScopeGuard, which
+  // renders a not-found boundary before this page mounts — so here we only render the happy path.
+  const { data: project } = useProject(projectId)
   const { data: branches } = useBranches(projectId)
   const current = branches?.find((b) => b.name === branch)
-  if (error !== null) {
-    return (
-      <PageContainer>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="mt-2 text-sm text-danger">{error.message}</p>
-      </PageContainer>
-    )
-  }
   return (
     <PageContainer>
       <div className="flex items-center gap-2.5">

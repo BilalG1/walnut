@@ -252,10 +252,11 @@ export function useDeleteAgent(orgId: string) {
   })
 }
 
-export function useBranches(projectId: string) {
+export function useBranches(projectId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: keys.branches(projectId),
     queryFn: () => unwrap(api.api.projects({ id: projectId }).branches.get()),
+    enabled: options?.enabled,
   })
 }
 
@@ -267,10 +268,11 @@ export function useBranch(projectId: string, branch: string) {
   })
 }
 
-export function useProject(projectId: string) {
+export function useProject(projectId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: keys.project(projectId),
     queryFn: () => unwrap(api.api.projects({ id: projectId }).get()),
+    enabled: options?.enabled,
   })
 }
 
