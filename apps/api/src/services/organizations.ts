@@ -1,5 +1,5 @@
-import { organizationMembers, organizations, users, type Organization, type OrgRole } from '@walnut/db'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { agents, branches, organizationMembers, organizations, projects, users, type Organization, type OrgRole } from '@walnut/db'
+import { and, asc, count, desc, eq } from 'drizzle-orm'
 import type { AuthClaims } from '../auth/verify.ts'
 import type { AppContext } from '../context.ts'
 import { badRequest, HttpError, notFound } from '../errors.ts'
@@ -120,6 +120,35 @@ export async function assertOrgMember(ctx: AppContext, orgId: string, userId: st
     .limit(1)
   if (row === undefined) {
     throw notFound('Organization')
+  }
+}
+
+/** The org's live count of each capped resource — projects, branches (across all of its
+ * projects), and agents. Mirrors the COUNTs the create-time limit guards run, surfaced
+ * read-only for the settings page. */
+export interface OrgUsageCounts {
+  projects: number
+  branches: number
+  agents: number
+}
+
+/** Count the org's provisioned resources against the caps. Caller must be a member (404
+ * otherwise, so usage never leaks an org's existence). The three counts run concurrently. */
+export async function getOrgUsage(ctx: AppContext, orgId: string, userId: string): Promise<OrgUsageCounts> {
+  await assertOrgMember(ctx, orgId, userId)
+  const [projectRows, branchRows, agentRows] = await Promise.all([
+    ctx.db.select({ n: count() }).from(projects).where(eq(projects.organizationId, orgId)),
+    ctx.db
+      .select({ n: count() })
+      .from(branches)
+      .innerJoin(projects, eq(branches.projectId, projects.id))
+      .where(eq(projects.organizationId, orgId)),
+    ctx.db.select({ n: count() }).from(agents).where(eq(agents.organizationId, orgId)),
+  ])
+  return {
+    projects: projectRows[0]?.n ?? 0,
+    branches: branchRows[0]?.n ?? 0,
+    agents: agentRows[0]?.n ?? 0,
   }
 }
 

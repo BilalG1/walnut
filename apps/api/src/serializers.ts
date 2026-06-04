@@ -1,4 +1,4 @@
-import { type AgentScope, effectiveScopes, type ScopeWithExpiry } from '@walnut/core'
+import { type AgentScope, effectiveScopes, RESOURCE_LIMITS, type ScopeWithExpiry } from '@walnut/core'
 import type {
   Agent,
   Branch,
@@ -134,6 +134,29 @@ export function toOrgSummary(org: Organization, role: string): OrgSummary {
     isPersonal: org.isPersonal,
     role,
     createdAt: org.createdAt.toISOString(),
+  }
+}
+
+/** One capped resource's usage: how many the org holds (`used`) against its ceiling (`limit`). */
+export interface ResourceUsage {
+  used: number
+  limit: number
+}
+
+/** The org's resource usage vs. its caps, as shown on the settings page. Limits come from
+ * `RESOURCE_LIMITS` (the single source of truth) so the dashboard never hardcodes them and
+ * can't drift from what the create-time guards enforce. */
+export interface OrgUsageView {
+  projects: ResourceUsage
+  branches: ResourceUsage
+  agents: ResourceUsage
+}
+
+export function toOrgUsageView(counts: { projects: number; branches: number; agents: number }): OrgUsageView {
+  return {
+    projects: { used: counts.projects, limit: RESOURCE_LIMITS.projectsPerOrg },
+    branches: { used: counts.branches, limit: RESOURCE_LIMITS.branchesPerOrg },
+    agents: { used: counts.agents, limit: RESOURCE_LIMITS.agentsPerOrg },
   }
 }
 

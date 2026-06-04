@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { treaty } from '@elysiajs/eden'
-import { hashKey, keyPrefix, newInviteToken, SYSTEM_USER_ID } from '@walnut/core'
+import { hashKey, keyPrefix, newInviteToken, RESOURCE_LIMITS, SYSTEM_USER_ID } from '@walnut/core'
 import { branches, organizationInvitations, organizationMembers, organizations } from '@walnut/db'
 import { eq } from 'drizzle-orm'
 import { Elysia } from 'elysia'
@@ -312,6 +312,31 @@ describe('organizations', () => {
     expect(inA.data?.some((r) => r.agentId === agent.id)).toBe(true)
     const inB = await h.api.api.organizations({ orgId: orgB.id }).requests.get({ query: { status: 'pending' } })
     expect(inB.data).toEqual([])
+  })
+
+  test('GET /:orgId/usage reports resource counts against the caps', async () => {
+    const orgId = await personalOrgId()
+
+    // A fresh org holds nothing; limits come from the single source of truth.
+    const before = await h.api.api.organizations({ orgId }).usage.get()
+    expect(before.status).toBe(200)
+    expect(before.data?.projects).toEqual({ used: 0, limit: RESOURCE_LIMITS.projectsPerOrg })
+    expect(before.data?.branches).toEqual({ used: 0, limit: RESOURCE_LIMITS.branchesPerOrg })
+    expect(before.data?.agents).toEqual({ used: 0, limit: RESOURCE_LIMITS.agentsPerOrg })
+
+    // A project provisions its `main` branch, and an agent bumps the agent count.
+    await newProject('usage-proj')
+    await newAgent('usage-bot')
+    const after = await h.api.api.organizations({ orgId }).usage.get()
+    expect(after.data?.projects.used).toBe(1)
+    expect(after.data?.branches.used).toBe(1)
+    expect(after.data?.agents.used).toBe(1)
+  }, 20_000)
+
+  test("a non-member cannot read an org's usage (404, no existence leak)", async () => {
+    const orgId = await personalOrgId()
+    const stranger = await h.clientFor('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', { email: 'strangerB@example.com' })
+    expect((await stranger.api.organizations({ orgId }).usage.get()).status).toBe(404)
   })
 })
 

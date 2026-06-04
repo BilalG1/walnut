@@ -3,13 +3,13 @@ import { AppLayout } from '../components/layout/AppLayout.tsx'
 import { AcceptInvitePage } from '../features/AcceptInvitePage.tsx'
 import { keys } from '../data/keys.ts'
 import { fetchMe, fetchOrganizations } from '../data/queries.ts'
-import { PlaceholderPage } from '../features/PlaceholderPage.tsx'
 import { AgentDetailPage } from '../features/orgs/AgentDetailPage.tsx'
 import { AgentsPage } from '../features/orgs/AgentsPage.tsx'
 import { GetStartedPage } from '../features/orgs/GetStartedPage.tsx'
 import { MembersPage } from '../features/orgs/MembersPage.tsx'
 import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
+import { SettingsPage } from '../features/orgs/SettingsPage.tsx'
 import { ActivityPage } from '../features/projects/ActivityPage.tsx'
 import { DatabasePage } from '../features/projects/DatabasePage.tsx'
 import { DataPage } from '../features/projects/DataPage.tsx'
@@ -59,11 +59,7 @@ const orgAgentDetailRoute = createRoute({
 })
 const orgRequestsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'requests', component: RequestsPage })
 const orgMembersRoute = createRoute({ getParentRoute: () => orgRoute, path: 'members', component: MembersPage })
-const orgSettingsRoute = createRoute({
-  getParentRoute: () => orgRoute,
-  path: 'settings',
-  component: () => <PlaceholderPage title="Organization settings" />,
-})
+const orgSettingsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'settings', component: SettingsPage })
 
 // Project / branch scope ----------------------------------------------------
 const projectRoute = createRoute({ getParentRoute: () => orgRoute, path: 'projects/$projectId/branches/$branch' })

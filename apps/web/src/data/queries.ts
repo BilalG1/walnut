@@ -53,6 +53,15 @@ export function useOrgAgents(orgId: string) {
   })
 }
 
+/** The org's resource usage against its caps (projects, branches, agents) — the settings
+ * page's usage bars. The limits travel with the counts (server-side, from RESOURCE_LIMITS). */
+export function useOrgUsage(orgId: string) {
+  return useQuery({
+    queryKey: keys.orgUsage(orgId),
+    queryFn: () => unwrap(api.api.organizations({ orgId }).usage.get()),
+  })
+}
+
 /** The org's member roster (user, role, joined-at). */
 export function useOrgMembers(orgId: string) {
   return useQuery({
@@ -68,6 +77,20 @@ export function useRemoveMember(orgId: string) {
     mutationFn: (memberId: string) => unwrap(api.api.organizations({ orgId }).members({ memberId }).delete()),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.orgMembers(orgId) })
+    },
+  })
+}
+
+/** Leave an organization — delete your own membership (the same endpoint as remove, addressed
+ * to yourself). Refreshes the org list so the org drops out of the switcher; the caller
+ * navigates away on success. The server's last-owner guard still applies. */
+export function useLeaveOrganization(orgId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (selfUserId: string) =>
+      unwrap(api.api.organizations({ orgId }).members({ memberId: selfUserId }).delete()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.orgs() })
     },
   })
 }

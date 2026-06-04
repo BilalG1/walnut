@@ -8,12 +8,13 @@ import {
   toOrgAgentView,
   toOrgProjectSummary,
   toOrgSummary,
+  toOrgUsageView,
   toProjectDetail,
   toScopeRequestView,
 } from '../serializers.ts'
 import { createAgent, listOrgAgents } from '../services/agents.ts'
 import { createInvitation, listInvitations, revokeInvitation } from '../services/invitations.ts'
-import { listMembers, listOrganizations, removeMember } from '../services/organizations.ts'
+import { getOrgUsage, listMembers, listOrganizations, removeMember } from '../services/organizations.ts'
 import { createProject, getDefaultBranch, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
 
@@ -61,6 +62,10 @@ export function organizationRoutes(ctx: AppContext) {
       },
       { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
     )
+    .get('/:orgId/usage', async ({ userId, params }) => {
+      const counts = await getOrgUsage(ctx, params.orgId, userId)
+      return toOrgUsageView(counts)
+    })
     .get('/:orgId/members', async ({ userId, params }) => {
       const rows = await listMembers(ctx, params.orgId, userId)
       return rows.map(toMemberView)
