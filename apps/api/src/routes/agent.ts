@@ -10,6 +10,7 @@ import { agentScopesForBranch, findAgentByKey, getAgentHomeProject, resolveAgent
 import { listBranchesInternal, listProjectsInOrg, resolveBranch } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
+import { uuid } from '../validation.ts'
 
 export function agentApiRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/agent/v1' })
@@ -52,7 +53,8 @@ export function agentApiRoutes(ctx: AppContext) {
         const rows = await listBranchesInternal(ctx, project.id)
         return rows.map((b) => ({ id: b.id, name: b.name, isDefault: b.isDefault }))
       },
-      { query: t.Object({ projectId: t.Optional(t.String()) }) },
+      // `projectId` is a project UUID (the CLI's `--project <id>`); validate before the DB cast.
+      { query: t.Object({ projectId: t.Optional(uuid) }) },
     )
     .post(
       '/query',
@@ -116,7 +118,7 @@ export function agentApiRoutes(ctx: AppContext) {
       {
         body: t.Object({
           sql: t.String({ minLength: 1 }),
-          projectId: t.Optional(t.String()),
+          projectId: t.Optional(uuid),
           branch: t.Optional(t.String()),
         }),
       },
@@ -157,11 +159,11 @@ export function agentApiRoutes(ctx: AppContext) {
           /** Optional time-box (seconds) for the requested scopes; omit for permanent. */
           expiresInSeconds: t.Optional(t.Integer({ minimum: 1 })),
           /** Agent-friendly target: a project id and/or a branch *name*. */
-          projectId: t.Optional(t.String()),
+          projectId: t.Optional(uuid),
           branch: t.Optional(t.String()),
           /** Raw target (used by the dashboard); takes precedence when both are set. */
           resourceType: t.Optional(t.Union([t.Literal('org'), t.Literal('project'), t.Literal('branch')])),
-          resourceId: t.Optional(t.String()),
+          resourceId: t.Optional(uuid),
         }),
       },
     )

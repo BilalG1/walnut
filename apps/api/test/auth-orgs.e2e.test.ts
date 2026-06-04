@@ -7,7 +7,7 @@ import { Elysia } from 'elysia'
 import { createApp } from '../src/app.ts'
 import type { HexclaveServerClient } from '../src/auth/hexclave-server.ts'
 import { devAuthRoutes } from '../src/routes/dev-auth.ts'
-import { bearer, grant, h, ms, newAgent, newProject, personalOrgId, useHarness } from './support.ts'
+import { bearer, type ErrorBody, grant, h, ms, newAgent, newProject, personalOrgId, useHarness } from './support.ts'
 
 useHarness()
 
@@ -259,6 +259,12 @@ describe('organizations', () => {
     const stranger = await h.clientFor('11111111-1111-1111-1111-111111111111', { email: 'stranger@example.com' })
     expect((await stranger.api.organizations({ orgId }).projects.get()).status).toBe(404)
     expect((await stranger.api.organizations({ orgId }).agents.get()).status).toBe(404)
+  })
+
+  test('a non-UUID org id is a clean 422, not a 500 from the uuid cast', async () => {
+    const res = await h.api.api.organizations({ orgId: 'not-a-uuid' }).projects.get()
+    expect(res.status).toBe(422)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('validation')
   })
 
   test('POST /api/organizations/:orgId/projects creates the project in that org', async () => {

@@ -103,6 +103,19 @@ describe('agent branch API', () => {
     expect(res.data?.resourceType).toBe('branch')
     expect(res.data?.resourceId).toBe(br.data?.id)
   }, 20_000)
+
+  test('a non-UUID projectId on the agent API is a clean 422, not a 500', async () => {
+    // The CLI passes `--project <id>` as a UUID; a malformed one is rejected by the body/query
+    // schema before resolveAgentProject can hit the Postgres `uuid` cast.
+    const agent = await newAgent('bad-proj-agent')
+    const q = await h.api.agent.v1.query.post(
+      { sql: 'select 1', projectId: 'not-a-uuid' },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(q.status).toBe(422)
+    const br = await h.api.agent.v1.branches.get({ headers: bearer(agent.apiKey), query: { projectId: 'nope' } })
+    expect(br.status).toBe(422)
+  }, 20_000)
 })
 
 describe('org-scoped agents', () => {

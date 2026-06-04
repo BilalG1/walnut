@@ -45,6 +45,22 @@ describe('projects', () => {
     expect(missing.status).toBe(404)
   })
 
+  test('a non-UUID project id is a clean 422, not a 500 from the uuid cast', async () => {
+    // A well-formed-but-missing UUID is a 404 (above); a malformed id is rejected by the param
+    // schema before it can reach the Postgres `uuid` cast (which would otherwise be a 500).
+    const res = await h.api.api.projects({ id: 'not-a-uuid' }).get()
+    expect(res.status).toBe(422)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('validation')
+
+    // The branch segment is a name (text), so it never casts — a bad branch on a real project
+    // is still a clean 404, and a bad project id under the branch route is still the 422.
+    const project = await newProject('branchy-422')
+    const badBranch = await h.api.api.projects({ id: project.id }).branches({ branch: 'nope' }).get()
+    expect(badBranch.status).toBe(404)
+    const badProj = await h.api.api.projects({ id: 'nope' }).branches({ branch: 'main' }).get()
+    expect(badProj.status).toBe(422)
+  })
+
   test('DELETE /api/projects/:id removes the project', async () => {
     const project = await newProject('to-delete')
     const del = await h.api.api.projects({ id: project.id }).delete()

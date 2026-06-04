@@ -3,6 +3,9 @@ import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { listScopeRequests, resolveScopeRequest } from '../services/scope-requests.ts'
+import { uuid } from '../validation.ts'
+
+const idParams = t.Object({ id: uuid })
 
 export function scopeRequestRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/scope-requests' })
@@ -25,12 +28,21 @@ export function scopeRequestRoutes(ctx: AppContext) {
         }),
       },
     )
-    .post('/:id/approve', async ({ userId, params }) => {
-      const { request } = await resolveScopeRequest(ctx, params.id, userId, 'approved')
-      return toScopeRequestView(request)
-    })
-    .post('/:id/deny', async ({ userId, params }) => {
-      const { request } = await resolveScopeRequest(ctx, params.id, userId, 'denied')
-      return toScopeRequestView(request)
-    })
+    .post(
+      '/:id/approve',
+      async ({ userId, params }) => {
+        const { request } = await resolveScopeRequest(ctx, params.id, userId, 'approved')
+        return toScopeRequestView(request)
+      },
+      { params: idParams },
+    )
+    .post(
+      '/:id/deny',
+      async ({ userId, params }) => {
+        const { request } = await resolveScopeRequest(ctx, params.id, userId, 'denied')
+        return toScopeRequestView(request)
+      },
+      { params: idParams },
+    )
+
 }

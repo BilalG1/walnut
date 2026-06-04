@@ -17,6 +17,13 @@ import { createInvitation, listInvitations, revokeInvitation } from '../services
 import { getOrgUsage, listMembers, listOrganizations, removeMember } from '../services/organizations.ts'
 import { createProject, getDefaultBranch, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
+import { uuid } from '../validation.ts'
+
+// Path-param schemas: every org/member/invitation id is a Postgres `uuid`, so reject a
+// non-UUID with a clean 422 before it reaches the DB cast (see validation.ts).
+const orgParams = t.Object({ orgId: uuid })
+const memberParams = t.Object({ orgId: uuid, memberId: uuid })
+const invitationParams = t.Object({ orgId: uuid, invitationId: uuid })
 
 export function organizationRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/organizations' })
@@ -29,16 +36,20 @@ export function organizationRoutes(ctx: AppContext) {
       const rows = await listOrganizations(ctx, userId)
       return rows.map(({ organization, role }) => toOrgSummary(organization, role))
     })
-    .get('/:orgId/projects', async ({ userId, params }) => {
-      const rows = await listOrgProjects(ctx, params.orgId, userId)
-      return rows.map((r) =>
-        toOrgProjectSummary(r.project, {
-          agentCount: r.agentCount,
-          pendingRequestCount: r.pendingRequestCount,
-          defaultBranch: r.defaultBranch,
-        }),
-      )
-    })
+    .get(
+      '/:orgId/projects',
+      async ({ userId, params }) => {
+        const rows = await listOrgProjects(ctx, params.orgId, userId)
+        return rows.map((r) =>
+          toOrgProjectSummary(r.project, {
+            agentCount: r.agentCount,
+            pendingRequestCount: r.pendingRequestCount,
+            defaultBranch: r.defaultBranch,
+          }),
+        )
+      },
+      { params: orgParams },
+    )
     .post(
       '/:orgId/projects',
       async ({ userId, params, body }) => {
@@ -46,12 +57,16 @@ export function organizationRoutes(ctx: AppContext) {
         const main = await getDefaultBranch(ctx, project.id)
         return toProjectDetail(project, main.connectionUri)
       },
-      { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
+      { params: orgParams, body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
     )
-    .get('/:orgId/agents', async ({ userId, params }) => {
-      const rows = await listOrgAgents(ctx, params.orgId, userId)
-      return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectNames))
-    })
+    .get(
+      '/:orgId/agents',
+      async ({ userId, params }) => {
+        const rows = await listOrgAgents(ctx, params.orgId, userId)
+        return rows.map((r) => toOrgAgentView(r.agent, r.grants, r.projectNames))
+      },
+      { params: orgParams },
+    )
     .post(
       '/:orgId/agents',
       async ({ userId, params, body }) => {
@@ -60,20 +75,32 @@ export function organizationRoutes(ctx: AppContext) {
         const { agent, grants, apiKey } = await createAgent(ctx, params.orgId, userId, body)
         return { ...toAgentView(agent, grants), apiKey }
       },
-      { body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
+      { params: orgParams, body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
     )
-    .get('/:orgId/usage', async ({ userId, params }) => {
-      const counts = await getOrgUsage(ctx, params.orgId, userId)
-      return toOrgUsageView(counts)
-    })
-    .get('/:orgId/members', async ({ userId, params }) => {
-      const rows = await listMembers(ctx, params.orgId, userId)
-      return rows.map(toMemberView)
-    })
-    .delete('/:orgId/members/:memberId', async ({ userId, params }) => {
-      await removeMember(ctx, params.orgId, params.memberId, userId)
-      return { removed: true }
-    })
+    .get(
+      '/:orgId/usage',
+      async ({ userId, params }) => {
+        const counts = await getOrgUsage(ctx, params.orgId, userId)
+        return toOrgUsageView(counts)
+      },
+      { params: orgParams },
+    )
+    .get(
+      '/:orgId/members',
+      async ({ userId, params }) => {
+        const rows = await listMembers(ctx, params.orgId, userId)
+        return rows.map(toMemberView)
+      },
+      { params: orgParams },
+    )
+    .delete(
+      '/:orgId/members/:memberId',
+      async ({ userId, params }) => {
+        await removeMember(ctx, params.orgId, params.memberId, userId)
+        return { removed: true }
+      },
+      { params: memberParams },
+    )
     .post(
       '/:orgId/invitations',
       async ({ userId, params, body }) => {
@@ -82,16 +109,24 @@ export function organizationRoutes(ctx: AppContext) {
         const { invitation, token } = await createInvitation(ctx, params.orgId, userId, { role: body.role })
         return { ...toInvitationView(invitation), token }
       },
-      { body: t.Object({ role: t.Optional(t.Union([t.Literal('member'), t.Literal('admin')])) }) },
+      { params: orgParams, body: t.Object({ role: t.Optional(t.Union([t.Literal('member'), t.Literal('admin')])) }) },
     )
-    .get('/:orgId/invitations', async ({ userId, params }) => {
-      const rows = await listInvitations(ctx, params.orgId, userId)
-      return rows.map(toInvitationView)
-    })
-    .delete('/:orgId/invitations/:invitationId', async ({ userId, params }) => {
-      await revokeInvitation(ctx, params.orgId, params.invitationId, userId)
-      return { revoked: true }
-    })
+    .get(
+      '/:orgId/invitations',
+      async ({ userId, params }) => {
+        const rows = await listInvitations(ctx, params.orgId, userId)
+        return rows.map(toInvitationView)
+      },
+      { params: orgParams },
+    )
+    .delete(
+      '/:orgId/invitations/:invitationId',
+      async ({ userId, params }) => {
+        await revokeInvitation(ctx, params.orgId, params.invitationId, userId)
+        return { revoked: true }
+      },
+      { params: invitationParams },
+    )
     .get(
       '/:orgId/requests',
       async ({ userId, params, query }) => {
@@ -99,6 +134,7 @@ export function organizationRoutes(ctx: AppContext) {
         return rows.map(toScopeRequestView)
       },
       {
+        params: orgParams,
         query: t.Object({
           status: t.Optional(t.Union([t.Literal('pending'), t.Literal('approved'), t.Literal('denied')])),
         }),
