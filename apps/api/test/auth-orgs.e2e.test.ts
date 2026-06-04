@@ -267,6 +267,14 @@ describe('organizations', () => {
     expect((res.error?.value as ErrorBody | undefined)?.error).toBe('validation')
   })
 
+  test('a malformed trailing path param (memberId) is also a 422', async () => {
+    // The shared uuid atom guards every path segment, not just the first — a valid org with a
+    // junk memberId is rejected before the DB, same as a bad org id.
+    const orgId = await personalOrgId()
+    const res = await h.api.api.organizations({ orgId }).members({ memberId: 'not-a-uuid' }).delete()
+    expect(res.status).toBe(422)
+  })
+
   test('POST /api/organizations/:orgId/projects creates the project in that org', async () => {
     const orgId = await personalOrgId()
     const created = await h.api.api.organizations({ orgId }).projects.post({ name: 'in-org' })

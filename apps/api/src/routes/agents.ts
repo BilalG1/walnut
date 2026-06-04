@@ -9,11 +9,10 @@ import {
   revokeGrantScope,
   rotateAgentKey,
 } from '../services/agents.ts'
-import { uuid } from '../validation.ts'
+import { idParams, uuid } from '../validation.ts'
 
-// Path-param schemas: agent and grant ids are Postgres `uuid`s (validate → 422, not a 500 from
-// the cast). The trailing `:scope` is a scope string (e.g. `db:read`), so it stays a string.
-const idParams = t.Object({ id: uuid })
+// Agent and grant ids are Postgres `uuid`s (validate → 422, not a 500 from the cast). The
+// trailing `:scope` is a scope string (e.g. `db:read`), so it stays a string.
 const grantParams = t.Object({ id: uuid, grantId: uuid })
 const grantScopeParams = t.Object({ id: uuid, grantId: uuid, scope: t.String() })
 

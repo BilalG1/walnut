@@ -3,9 +3,7 @@ import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
 import { toScopeRequestView } from '../serializers.ts'
 import { listScopeRequests, resolveScopeRequest } from '../services/scope-requests.ts'
-import { uuid } from '../validation.ts'
-
-const idParams = t.Object({ id: uuid })
+import { idParams } from '../validation.ts'
 
 export function scopeRequestRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/scope-requests' })

@@ -30,7 +30,9 @@ afterEach(() => {
 })
 
 /** Stub the three endpoints the guard touches. `branches` lets a test return a list that omits
- * the requested branch; project id `p1` exists, anything else is a 404. */
+ * the requested branch. Project ids drive the project query's outcome: `p1` exists (200), `p500`
+ * faults (500), `pbad` is a malformed-id rejection (422, as the real backend now returns), and
+ * anything else is a 404. */
 function stubApi(branches: typeof BRANCHES = BRANCHES): void {
   globalThis.fetch = (async (input: unknown) => {
     const url = typeof input === 'string' ? input : String((input as { url?: string })?.url ?? input)
@@ -38,7 +40,16 @@ function stubApi(branches: typeof BRANCHES = BRANCHES): void {
       return json(branches)
     }
     if (/\/api\/projects\/[^/]+$/.test(url)) {
-      return url.includes('/api/projects/p1') ? json(PROJECT) : json({ error: 'not_found', message: 'x' }, 404)
+      if (url.includes('/api/projects/p1')) {
+        return json(PROJECT)
+      }
+      if (url.includes('/api/projects/p500')) {
+        return json({ error: 'internal_error', message: 'boom' }, 500)
+      }
+      if (url.includes('/api/projects/pbad')) {
+        return json({ error: 'validation', message: 'Invalid id: expected a UUID.' }, 422)
+      }
+      return json({ error: 'not_found', message: 'x' }, 404)
     }
     if (url.includes('/api/organizations')) {
       return json(ORGS)
@@ -100,5 +111,17 @@ describe('useScopeGuard', () => {
     stubApi(BRANCHES) // only has "main"
     scope = { orgId: 'org1', projectId: 'p1', branch: 'feature-x' }
     expect(await verdict()).toBe('not-found:branch')
+  })
+
+  test('a malformed project id (422 from the backend) is treated as not-found:project', async () => {
+    stubApi()
+    scope = { orgId: 'org1', projectId: 'pbad', branch: 'main' }
+    expect(await verdict()).toBe('not-found:project')
+  })
+
+  test('a genuine project fault (500) is an error, not a not-found', async () => {
+    stubApi()
+    scope = { orgId: 'org1', projectId: 'p500', branch: 'main' }
+    expect(await verdict()).toBe('error')
   })
 })

@@ -17,7 +17,7 @@ import { createInvitation, listInvitations, revokeInvitation } from '../services
 import { getOrgUsage, listMembers, listOrganizations, removeMember } from '../services/organizations.ts'
 import { createProject, getDefaultBranch, listOrgProjects } from '../services/projects.ts'
 import { listOrgScopeRequests } from '../services/scope-requests.ts'
-import { uuid } from '../validation.ts'
+import { nameSchema, uuid } from '../validation.ts'
 
 // Path-param schemas: every org/member/invitation id is a Postgres `uuid`, so reject a
 // non-UUID with a clean 422 before it reaches the DB cast (see validation.ts).
@@ -57,7 +57,7 @@ export function organizationRoutes(ctx: AppContext) {
         const main = await getDefaultBranch(ctx, project.id)
         return toProjectDetail(project, main.connectionUri)
       },
-      { params: orgParams, body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
+      { params: orgParams, body: t.Object({ name: nameSchema }) },
     )
     .get(
       '/:orgId/agents',
@@ -75,7 +75,7 @@ export function organizationRoutes(ctx: AppContext) {
         const { agent, grants, apiKey } = await createAgent(ctx, params.orgId, userId, body)
         return { ...toAgentView(agent, grants), apiKey }
       },
-      { params: orgParams, body: t.Object({ name: t.String({ minLength: 1, maxLength: 64 }) }) },
+      { params: orgParams, body: t.Object({ name: nameSchema }) },
     )
     .get(
       '/:orgId/usage',

@@ -21,14 +21,10 @@ import {
   resolveBranch,
 } from '../services/projects.ts'
 import { runReadOnlyQuery } from '../services/query.ts'
-import { uuid } from '../validation.ts'
+import { idParams, nameSchema, uuid } from '../validation.ts'
 
-const nameSchema = t.String({ minLength: 1, maxLength: 64 })
-
-// Path-param schemas: validate the project id as a UUID before it reaches the DB (a non-UUID
-// would otherwise fail the Postgres `uuid` cast as an opaque 500). The branch segment is a
-// plain name (a `text` column), so it stays an unconstrained string.
-const idParams = t.Object({ id: uuid })
+// The branch segment is a plain name (a `text` column), so it stays an unconstrained string;
+// only the project `:id` is validated as a UUID (see validation.ts).
 const branchParams = t.Object({ id: uuid, branch: t.String() })
 
 /** Body for the read-only data-viewer SQL routes: a statement plus positional params. Scalars

@@ -2,9 +2,9 @@ import { Link } from '@tanstack/react-router'
 import { ArrowLeft, Building, GitBranch, LayoutGrid } from '@walnut/icons'
 import { Button, Spinner } from '@walnut/ui'
 import type { ReactNode } from 'react'
-import { useBranches, useOrganizations } from '../../data/queries.ts'
 import { useScope } from '../../app/useScope.ts'
 import type { MissingResource, ScopeGuardResult } from '../../app/useScopeGuard.ts'
+import { useBranches, useOrganizations } from '../../data/queries.ts'
 
 /** Centered, full-height frame shared by every boundary state (so they sit consistently in the
  * main content area beside the chrome). */
