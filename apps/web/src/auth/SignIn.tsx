@@ -1,7 +1,8 @@
-import { Button, Card } from '@walnut/ui'
+import { Button } from '@walnut/ui'
 import { useState, type FormEvent } from 'react'
 import { useTheme } from '../app/theme.tsx'
-import githubLogo from '../assets/github.svg'
+import githubLogoDark from '../assets/github-dark.svg'
+import githubLogoLight from '../assets/github-light.svg'
 import googleLogo from '../assets/google.svg'
 import walnutLogoDark from '../assets/walnut-logo-dark.svg'
 import walnutLogoLight from '../assets/walnut-logo-light.svg'
@@ -9,15 +10,15 @@ import { authConfig } from '../lib/auth/config.ts'
 import type { OAuthProvider } from '../lib/auth/oauth.ts'
 import { useAuth } from './AuthProvider.tsx'
 
-const PROVIDERS: { id: OAuthProvider; label: string; logo: string }[] = [
-  { id: 'google', label: 'Continue with Google', logo: googleLogo },
-  { id: 'github', label: 'Continue with GitHub', logo: githubLogo },
-]
-
 export function SignIn() {
   const { signInWithOAuth } = useAuth()
   const { theme } = useTheme()
   const walnutLogo = theme === 'dark' ? walnutLogoDark : walnutLogoLight
+  const githubLogo = theme === 'dark' ? githubLogoDark : githubLogoLight
+  const providers: { id: OAuthProvider; label: string; logo: string }[] = [
+    { id: 'google', label: 'Continue with Google', logo: googleLogo },
+    { id: 'github', label: 'Continue with GitHub', logo: githubLogo },
+  ]
   const [pendingProvider, setPendingProvider] = useState<OAuthProvider | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,13 +42,13 @@ export function SignIn() {
       <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center px-5 py-16">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <img src={walnutLogo} alt="Walnut Cloud" className="h-12 w-12" />
-          <h1 className="text-lg font-semibold tracking-tight text-fg">Sign in to Walnut Cloud</h1>
-          <p className="text-xs text-subtle">The agent-native cloud.</p>
+          <h1 className="text-lg font-semibold tracking-tight text-fg">Sign in to Walnut</h1>
+          <p className="text-xs text-subtle">Sign in to Walnut</p>
         </div>
 
-        <Card className="flex w-full flex-col gap-2 p-5">
+        <div className="flex w-full flex-col gap-2">
           {hasOAuth ? (
-            PROVIDERS.map((provider) => (
+            providers.map((provider) => (
               <Button
                 key={provider.id}
                 variant="ghost"
@@ -62,7 +63,7 @@ export function SignIn() {
             <p className="text-sm text-muted">No sign-in providers are configured.</p>
           )}
           {error !== null && <p className="text-xs text-danger">{error}</p>}
-        </Card>
+        </div>
       </div>
     </>
   )
