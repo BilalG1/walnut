@@ -1,7 +1,6 @@
 import { type AgentScope, effectiveScopes, type ScopeWithExpiry } from '@walnut/core'
 import type {
   Agent,
-  AgentGrant,
   Branch,
   Organization,
   OrganizationInvitation,
@@ -10,6 +9,7 @@ import type {
   ScopeRequest,
   User,
 } from '@walnut/db'
+import type { GrantWithScopes } from './services/agents.ts'
 
 /** The authenticated user's own profile (`GET /api/me`). `onboardingCompletedAt` drives
  * the first-run routing and sidebar gating; null means onboarding isn't finished. */
@@ -26,10 +26,6 @@ export function toMeView(user: User): MeView {
     onboardingCompletedAt: user.onboardingCompletedAt === null ? null : user.onboardingCompletedAt.toISOString(),
   }
 }
-
-/** A grant with its scope rows (each carrying an optional expiry) — what the serializers
- * receive from the services. */
-type GrantWithScopes = AgentGrant & { scopes: ScopeWithExpiry[] }
 
 export interface ProjectSummary {
   id: string

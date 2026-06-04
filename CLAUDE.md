@@ -91,9 +91,11 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 - **Imports use explicit `.ts`/`.tsx` extensions** (bundler resolution, verbatim modules).
 - **Testing:** `bun test`.
   - Unit-test complex pure functions/components (see `packages/core/test`, `apps/web/test`).
-  - **Every API route has an e2e test** in `apps/api/test/api.e2e.test.ts`, driven through
-    the Eden treaty client against an in-memory app + a real `walnut_test` Postgres DB
-    (the `local` provider creates throwaway per-project databases).
+  - **Every API route has an e2e test** in `apps/api/test/*.e2e.test.ts` (split by domain:
+    `projects-branches`, `agents`, `scopes`, `auth-orgs`, `limits`), driven through the Eden
+    treaty client against an in-memory app + a real `walnut_test` Postgres DB (the `local`
+    provider creates throwaway per-project databases). Shared helpers and the per-file harness
+    lifecycle (`useHarness()`) live in `apps/api/test/support.ts`.
   - Frontend component tests use `@testing-library/react` + happy-dom (preloaded via
     `apps/web/bunfig.toml`).
 - **User auth (Hexclave):** dashboard `/api/*` requests carry a Hexclave-issued JWT,
