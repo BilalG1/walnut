@@ -1,8 +1,8 @@
 /**
- * Agent scopes. For the MVP these are all database-related, but the type is
- * intentionally a flat string union (e.g. `db:read`, later `fn:deploy`,
- * `email:send`, `logs:read`) so new capability domains can be added without
- * reshaping the model.
+ * Agent scopes. The type is intentionally a flat string union across capability domains —
+ * `db:*` (Postgres), `storage:*` (object storage), `branch:create` (provisioning), and later
+ * `fn:deploy`, `email:send`, `logs:read` — so new domains can be added without reshaping the
+ * grant/approval model.
  */
 export const DB_SCOPES = ['db:read', 'db:write', 'db:delete', 'db:ddl'] as const
 
@@ -19,17 +19,32 @@ export const BRANCH_SCOPES = ['branch:create'] as const
 
 export type BranchScope = (typeof BRANCH_SCOPES)[number]
 
+/**
+ * Storage scopes — per-branch object storage, the second database-like capability domain. Like
+ * `db:*` they anchor to a branch's data and cascade project→branch, but unlike `db:*` they carry
+ * no Postgres engine bit: object storage has no engine-level enforcement backstop, so the API +
+ * presign logic is the sole authorization layer (a deliberate reduction in defense-in-depth,
+ * compensated by short-TTL single-object presigns and never exposing physical keys). `storage:read`
+ * lists/reads objects, `storage:write` uploads/overwrites, `storage:delete` writes tombstones.
+ */
+export const STORAGE_SCOPES = ['storage:read', 'storage:write', 'storage:delete'] as const
+
+export type StorageScope = (typeof STORAGE_SCOPES)[number]
+
 /** Union of every scope the platform understands today. */
-export type AgentScope = DbScope | BranchScope
+export type AgentScope = DbScope | StorageScope | BranchScope
 
 /** Every scope that can currently be granted, in display order. */
-export const ALL_SCOPES: readonly AgentScope[] = [...DB_SCOPES, ...BRANCH_SCOPES]
+export const ALL_SCOPES: readonly AgentScope[] = [...DB_SCOPES, ...STORAGE_SCOPES, ...BRANCH_SCOPES]
 
 export const SCOPE_DESCRIPTIONS: Record<AgentScope, string> = {
   'db:read': 'Run read-only queries (SELECT, SHOW, EXPLAIN).',
   'db:write': 'Insert, update and copy rows (INSERT, UPDATE, MERGE, COPY).',
   'db:delete': 'Remove rows (DELETE, TRUNCATE).',
   'db:ddl': 'Change the schema (CREATE, ALTER, DROP, GRANT).',
+  'storage:read': 'List and download stored objects.',
+  'storage:write': 'Upload and overwrite stored objects.',
+  'storage:delete': 'Delete stored objects.',
   'branch:create': 'Create a new branch by forking an existing one.',
 }
 
@@ -50,19 +65,19 @@ export const GRANT_RESOURCE_TYPES = ['org', 'project', 'branch'] as const
 export type GrantResourceType = (typeof GRANT_RESOURCE_TYPES)[number]
 
 /**
- * Which scopes are grantable at each resource level. `db:*` scopes attach to a
- * database, which only exists at the `project`/`branch` level — never the `org`,
- * which has no database of its own. `branch:create` is the first scope grantable at
- * every level: at `org` it lets an agent fork branches in any project of the org; at
- * `project` (cascading like `db:*`) any branch of that project; at `branch` just that
- * one branch (a "you may fork this branch" grant — the fork itself is reachable only if
- * a project/org grant also covers it). It's also what finally gives the `org` level real
- * vocabulary, alongside future non-database org-wide scopes (e.g. `member:invite`).
+ * Which scopes are grantable at each resource level. `db:*` and `storage:*` scopes attach to a
+ * branch's data, which only exists at the `project`/`branch` level — never the `org`, which has
+ * no database/storage of its own; a project grant cascades to every branch. `branch:create` is
+ * the scope grantable at every level: at `org` it lets an agent fork branches in any project of
+ * the org; at `project` (cascading like `db:*`) any branch of that project; at `branch` just that
+ * one branch (a "you may fork this branch" grant — the fork itself is reachable only if a
+ * project/org grant also covers it). It's also what gives the `org` level real vocabulary,
+ * alongside future non-database org-wide scopes (e.g. `member:invite`).
  */
 export const SCOPES_BY_RESOURCE: Record<GrantResourceType, readonly AgentScope[]> = {
   org: BRANCH_SCOPES,
-  project: [...DB_SCOPES, ...BRANCH_SCOPES],
-  branch: [...DB_SCOPES, ...BRANCH_SCOPES],
+  project: [...DB_SCOPES, ...STORAGE_SCOPES, ...BRANCH_SCOPES],
+  branch: [...DB_SCOPES, ...STORAGE_SCOPES, ...BRANCH_SCOPES],
 }
 
 export function isScopeValidForResource(resourceType: GrantResourceType, scope: AgentScope): boolean {

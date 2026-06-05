@@ -9,7 +9,9 @@ import {
   parseScopesForResource,
   scopeMask,
   scopeSetKey,
+  SCOPE_DESCRIPTIONS,
   SCOPES_BY_RESOURCE,
+  STORAGE_SCOPES,
 } from '../src/scopes.ts'
 
 describe('scopes', () => {
@@ -143,5 +145,50 @@ describe('non-database scopes (branch:create)', () => {
     const past = new Date(now.getTime() - 1000)
     expect(effectiveScopes([{ scope: 'branch:create', expiresAt: future }], now)).toEqual(['branch:create'])
     expect(effectiveScopes([{ scope: 'branch:create', expiresAt: past }], now)).toEqual([])
+  })
+})
+
+describe('storage scopes', () => {
+  test('the three storage scopes are recognised and described', () => {
+    expect([...STORAGE_SCOPES]).toEqual(['storage:read', 'storage:write', 'storage:delete'])
+    for (const s of STORAGE_SCOPES) {
+      expect(isAgentScope(s)).toBe(true)
+      expect(SCOPE_DESCRIPTIONS[s].length).toBeGreaterThan(0)
+    }
+  })
+
+  test('storage scopes are grantable at project and branch, never org (like db:*)', () => {
+    for (const s of STORAGE_SCOPES) {
+      expect(isScopeValidForResource('project', s)).toBe(true)
+      expect(isScopeValidForResource('branch', s)).toBe(true)
+      expect(isScopeValidForResource('org', s)).toBe(false)
+    }
+    expect(parseScopesForResource('branch', ['storage:read', 'storage:write'])).toEqual([
+      'storage:read',
+      'storage:write',
+    ])
+    expect(() => parseScopesForResource('org', ['storage:read'])).toThrow(/cannot be granted at the "org" level/)
+  })
+
+  test('storage scopes carry no engine bit — they never widen the scope-set key', () => {
+    // No Postgres role for storage, so the mask (which drives DB connection selection) ignores them.
+    expect(scopeMask(['storage:read', 'storage:write', 'storage:delete'])).toBe(0)
+    expect(scopeSetKey(['storage:read'])).toBe('0')
+    expect(scopeSetKey(['db:read', 'storage:write'])).toBe(scopeSetKey(['db:read']))
+  })
+
+  test('parse + effectiveScopes treat storage scopes like any other (display order, expiry)', () => {
+    const now = new Date('2026-06-02T12:00:00Z')
+    const past = new Date(now.getTime() - 1000)
+    expect(parseScopes(['storage:delete', 'storage:read'])).toEqual(['storage:read', 'storage:delete'])
+    expect(
+      effectiveScopes(
+        [
+          { scope: 'storage:read', expiresAt: null },
+          { scope: 'storage:write', expiresAt: past },
+        ],
+        now,
+      ),
+    ).toEqual(['storage:read'])
   })
 })
