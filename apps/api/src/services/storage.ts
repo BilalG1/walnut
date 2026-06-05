@@ -16,8 +16,11 @@
  * are stable and match the `(owner_branch_id, path COLLATE "C")` index. Only `committed` rows are
  * visible; an in-flight (`pending`) upload never shows up in a read.
  */
-import { sql } from 'drizzle-orm'
+import { effectiveScopes, isSha256, physicalKey, type ScopeWithExpiry, type StorageScope, STORAGE_LIMITS } from '@walnut/core'
+import { type Branch, physicalObjects, type Project, storageObjects } from '@walnut/db'
+import { and, count, eq, sql } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
+import { badRequest, HttpError, insufficientScope, limitExceeded, notFound } from '../errors.ts'
 
 /** A resolved, live object in a branch's effective view (never a tombstone). */
 export interface ResolvedObject {
@@ -173,4 +176,351 @@ export async function listObjects(
   // A full page implies there may be more; the cursor is the last path returned.
   const nextCursor = objects.length === opts.limit ? (objects[objects.length - 1]?.path ?? null) : null
   return { objects, nextCursor }
+}
+
+// ─── Agent-facing operations ──────────────────────────────────────────────────────────────────
+//
+// The API + presign logic is the SOLE enforcement layer for blobs (object storage has no
+// engine-level backstop like the Postgres scope roles). So every operation authorizes the agent's
+// effective storage scopes on the target branch FIRST, agents only ever name `(branch, path)` and
+// never see a physical key, and reads/writes hand back short-TTL, single-object presigned URLs so
+// the bytes never transit the API.
+
+/** Metadata view of a stored object handed back to agents — never the physical key. */
+export interface ObjectView {
+  path: string
+  size: number
+  contentType: string | null
+  etag: string | null
+}
+
+/** A presigned download: the object metadata plus a short-TTL GET URL. */
+export interface DownloadView extends ObjectView {
+  url: string
+  expiresInSeconds: number
+}
+
+/** The outcome of starting an upload: either a presigned PUT to perform, or an immediate commit
+ * when the bytes already exist in this project (content-addressed dedup → idempotent write). */
+export type UploadView =
+  | { status: 'upload'; path: string; url: string; expiresInSeconds: number }
+  | { status: 'committed'; path: string; size: number }
+
+function toView(o: ResolvedObject): ObjectView {
+  return { path: o.path, size: o.size, contentType: o.contentType, etag: o.etag }
+}
+
+/** Authorize the agent's effective storage scopes, or throw the machine-readable 403 that drives
+ * the scope-request approval loop (identical shape to the db-query path). */
+function authorizeStorage(scopeRows: readonly ScopeWithExpiry[], required: StorageScope): void {
+  const granted = effectiveScopes(scopeRows)
+  if (!granted.includes(required)) {
+    throw insufficientScope(
+      `This operation requires the "${required}" scope but your agent is missing it. ` +
+        'You can ask the user to grant it by creating a scope request (POST /agent/v1/scope-requests).',
+      [required],
+      granted,
+    )
+  }
+}
+
+/** Validate a logical key. Opaque text — only the manifest indexes it; the physical key derives
+ * from the content hash, so a path can never traverse the object store. We just bound it. */
+function validatePath(path: string): void {
+  if (path.length === 0) {
+    throw badRequest('Storage path must not be empty.')
+  }
+  if (path.length > STORAGE_LIMITS.maxPathLength) {
+    throw badRequest(`Storage path is too long (max ${STORAGE_LIMITS.maxPathLength} characters).`)
+  }
+  // Reject C0 control characters (incl. NUL, newlines, tabs): they make near-invisible or
+  // confusable keys and have no legitimate use in a logical key. (No injection risk — `path` is
+  // always a bound parameter and never reaches the physical key — this is hygiene.)
+  for (let i = 0; i < path.length; i++) {
+    if (path.charCodeAt(i) < 0x20) {
+      throw badRequest('Storage path must not contain control characters.')
+    }
+  }
+}
+
+/** The maximum-blob-size guard, applied to both the client-declared size (an early reject) and,
+ * authoritatively, the real size captured by HEAD at commit. */
+function assertWithinBlobSize(size: number): void {
+  if (size > STORAGE_LIMITS.maxBlobBytes) {
+    throw limitExceeded(`Object exceeds the maximum blob size of ${STORAGE_LIMITS.maxBlobBytes} bytes.`, {
+      limit: 'max_blob_bytes',
+      max: STORAGE_LIMITS.maxBlobBytes,
+      scope: 'branch',
+    })
+  }
+}
+
+/** Upsert this branch's divergence row for `path` (one row per branch per path — a write or a
+ * tombstone). Re-uploading or deleting a path replaces the branch's prior row. */
+async function upsertManifestRow(
+  ctx: AppContext,
+  branchId: string,
+  path: string,
+  row: { physicalKey: string | null; deleted: boolean; size: number; contentType: string | null; etag: string | null; state: 'pending' | 'committed' },
+): Promise<void> {
+  await ctx.db
+    .insert(storageObjects)
+    .values({ ownerBranchId: branchId, path, ...row })
+    .onConflictDoUpdate({ target: [storageObjects.ownerBranchId, storageObjects.path], set: row })
+}
+
+/**
+ * Enforce the per-branch storage caps for a write of `addBytes` at `path` — count-then-insert,
+ * like the resource caps. Quota counts only what this branch OWNS (its divergence rows), never
+ * inherited bytes, so branching a big dataset doesn't make every branch instantly over quota.
+ *
+ * Called twice: at upload time against the *client-declared* size (an early, best-effort reject),
+ * and again at commit against the *real* size from HEAD (the authoritative check — without it the
+ * size limits would be decorative, since a presigned PUT can carry any number of bytes).
+ *
+ * - The **object-count** cap counts ALL of the branch's rows (pending + committed + tombstones), so
+ *   a flood of presigned-but-never-completed uploads can't slip past it.
+ * - The **owned-bytes** cap counts only *committed, non-tombstone* rows (real stored bytes); a
+ *   pending row's declared size is unverified and isn't "owned" until its bytes actually land.
+ */
+async function enforceBranchStorageCaps(ctx: AppContext, branchId: string, path: string, addBytes: number): Promise<void> {
+  const [existing] = await ctx.db
+    .select({ size: storageObjects.size, state: storageObjects.state })
+    .from(storageObjects)
+    .where(and(eq(storageObjects.ownerBranchId, branchId), eq(storageObjects.path, path)))
+    .limit(1)
+  // Object-count cap — a brand-new path adds a row; overwriting an existing owned path doesn't.
+  if (existing === undefined) {
+    const [{ n } = { n: 0 }] = await ctx.db
+      .select({ n: count() })
+      .from(storageObjects)
+      .where(eq(storageObjects.ownerBranchId, branchId))
+    if (n >= STORAGE_LIMITS.maxObjectsPerBranch) {
+      throw limitExceeded(`This branch has reached its limit of ${STORAGE_LIMITS.maxObjectsPerBranch} stored objects.`, {
+        limit: 'storage_objects_per_branch',
+        max: STORAGE_LIMITS.maxObjectsPerBranch,
+        scope: 'branch',
+      })
+    }
+  }
+  // Owned-bytes cap — sum of the branch's committed, non-tombstone rows, minus the committed row
+  // being replaced (a pending row isn't in the sum, so there's nothing to subtract for it).
+  const [{ s } = { s: 0 }] = await ctx.db
+    .select({ s: sql<string>`coalesce(sum(${storageObjects.size}), 0)` })
+    .from(storageObjects)
+    .where(
+      and(
+        eq(storageObjects.ownerBranchId, branchId),
+        eq(storageObjects.deleted, false),
+        eq(storageObjects.state, 'committed'),
+      ),
+    )
+  const replacedBytes = existing?.state === 'committed' ? Number(existing.size) : 0
+  const ownedNow = Number(s) - replacedBytes
+  if (ownedNow + addBytes > STORAGE_LIMITS.maxOwnedBytesPerBranch) {
+    throw limitExceeded(
+      `This branch would exceed its storage quota of ${STORAGE_LIMITS.maxOwnedBytesPerBranch} owned bytes.`,
+      { limit: 'storage_owned_bytes_per_branch', max: STORAGE_LIMITS.maxOwnedBytesPerBranch, scope: 'branch' },
+    )
+  }
+}
+
+/**
+ * Two-phase write, phase one. Authorize `storage:write`, validate, enforce caps, then either mint
+ * a presigned PUT to the content-addressed key, or — when those exact bytes already exist in this
+ * project AND are present in the store — record the manifest row as committed immediately (free
+ * dedup, idempotent write). The client hashes up front, so our CLI presigns straight to
+ * `blobs/<sha256>`; it then calls {@link commitUpload}.
+ *
+ * **Content-addressing trust boundary (a deliberate PoC limitation):** the physical key derives
+ * from the *client-declared* sha256, and Bun's presign can't bind a checksum into the PUT, so a
+ * client could store bytes that don't match the digest. The blast radius is one project: keys are
+ * project-scoped, so a mismatch can never poison another tenant's bytes or be read cross-tenant —
+ * and within a project all agents share one org/owner (the same mutual-trust model as `db:ddl`).
+ * Size limits are NOT trusted to the client, though: they're re-enforced against the real HEAD
+ * size at commit (see {@link commitUpload}). Hardening seam: bind `x-amz-checksum-sha256` once the
+ * provider/SDK supports it, so the store itself rejects a mismatched body.
+ */
+export async function createUpload(
+  ctx: AppContext,
+  project: Project,
+  branch: Branch,
+  scopeRows: readonly ScopeWithExpiry[],
+  input: { path: string; sha256: string; size: number; contentType?: string },
+): Promise<UploadView> {
+  authorizeStorage(scopeRows, 'storage:write')
+  validatePath(input.path)
+  if (!isSha256(input.sha256)) {
+    throw badRequest('Invalid sha256: expected 64 lowercase hex characters.')
+  }
+  if (!Number.isSafeInteger(input.size) || input.size < 0) {
+    throw badRequest('Invalid size: expected a non-negative integer.')
+  }
+  assertWithinBlobSize(input.size)
+  await enforceBranchStorageCaps(ctx, branch.id, input.path, input.size)
+
+  const key = physicalKey(project.id, input.sha256)
+  const contentType = input.contentType ?? null
+
+  // Try to claim the physical object. If it already existed AND the bytes are really in the store,
+  // we can skip the upload entirely. (A leftover physical row from a never-completed upload has no
+  // bytes — fall through to a fresh presign in that case.)
+  const claimed = await ctx.db
+    .insert(physicalObjects)
+    .values({ physicalKey: key, size: input.size })
+    .onConflictDoNothing()
+    .returning({ physicalKey: physicalObjects.physicalKey })
+  if (claimed.length === 0) {
+    const head = await ctx.blobProvider.head(key)
+    if (head.exists) {
+      // Dedup hit: re-check caps against the REAL size, not the client-declared one (a client
+      // could declare a tiny size while pointing at an existing large key to slip the quota).
+      assertWithinBlobSize(head.size)
+      await enforceBranchStorageCaps(ctx, branch.id, input.path, head.size)
+      await upsertManifestRow(ctx, branch.id, input.path, {
+        physicalKey: key,
+        deleted: false,
+        size: head.size,
+        contentType,
+        etag: head.etag,
+        state: 'committed',
+      })
+      return { status: 'committed', path: input.path, size: head.size }
+    }
+  }
+
+  // New (or not-yet-uploaded) bytes: stage a pending row and presign the PUT.
+  await upsertManifestRow(ctx, branch.id, input.path, {
+    physicalKey: key,
+    deleted: false,
+    size: input.size,
+    contentType,
+    etag: null,
+    state: 'pending',
+  })
+  const url = await ctx.blobProvider.presignPut(key, {
+    expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds,
+    contentType: input.contentType,
+  })
+  return { status: 'upload', path: input.path, url, expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds }
+}
+
+/**
+ * Two-phase write, phase two. After the client has PUT the bytes, HEAD the object to confirm it
+ * exists and capture the REAL size/etag (never trust the client-declared size), update the
+ * physical object's size, and flip the manifest row to `committed` — making it visible to reads.
+ */
+export async function commitUpload(
+  ctx: AppContext,
+  branch: Branch,
+  scopeRows: readonly ScopeWithExpiry[],
+  input: { path: string },
+): Promise<ObjectView> {
+  authorizeStorage(scopeRows, 'storage:write')
+  const [row] = await ctx.db
+    .select()
+    .from(storageObjects)
+    .where(and(eq(storageObjects.ownerBranchId, branch.id), eq(storageObjects.path, input.path)))
+    .limit(1)
+  if (row === undefined || row.state !== 'pending' || row.physicalKey === null) {
+    throw new HttpError(409, {
+      error: 'no_pending_upload',
+      message: `No pending upload for "${input.path}" on this branch. Start one with POST /agent/v1/storage/upload.`,
+    })
+  }
+  const head = await ctx.blobProvider.head(row.physicalKey)
+  if (!head.exists) {
+    throw new HttpError(409, {
+      error: 'upload_missing',
+      message: `No uploaded bytes found for "${input.path}". PUT to the presigned URL before committing.`,
+    })
+  }
+  // The presigned PUT is unconstrained, so the bytes that actually landed may be larger than the
+  // client declared. Re-enforce the size caps against the REAL HEAD size before committing — this
+  // is the authoritative check; the upload-time check on the declared size is only an early reject.
+  assertWithinBlobSize(head.size)
+  await enforceBranchStorageCaps(ctx, branch.id, input.path, head.size)
+  await ctx.db.update(physicalObjects).set({ size: head.size }).where(eq(physicalObjects.physicalKey, row.physicalKey))
+  const [updated] = await ctx.db
+    .update(storageObjects)
+    .set({ state: 'committed', size: head.size, etag: head.etag })
+    .where(and(eq(storageObjects.ownerBranchId, branch.id), eq(storageObjects.path, input.path)))
+    .returning()
+  return {
+    path: input.path,
+    size: updated?.size ?? head.size,
+    contentType: updated?.contentType ?? null,
+    etag: updated?.etag ?? head.etag,
+  }
+}
+
+/** Delete `path` on a branch by writing a tombstone (the bytes are shared, so they're never
+ * removed inline — GC reclaims them once unreferenced). 404 if nothing resolves at `path`. */
+export async function deleteObject(
+  ctx: AppContext,
+  branch: Branch,
+  scopeRows: readonly ScopeWithExpiry[],
+  input: { path: string },
+): Promise<{ path: string; deleted: true }> {
+  authorizeStorage(scopeRows, 'storage:delete')
+  const resolved = await resolveObject(ctx, branch.ancestry, input.path)
+  if (resolved === null) {
+    throw notFound('Object')
+  }
+  await upsertManifestRow(ctx, branch.id, input.path, {
+    physicalKey: null,
+    deleted: true,
+    size: 0,
+    contentType: null,
+    etag: null,
+    state: 'committed',
+  })
+  return { path: input.path, deleted: true }
+}
+
+/** Point-stat: the resolved object's metadata in this branch's effective view (404 if absent). */
+export async function statObject(
+  ctx: AppContext,
+  branch: Branch,
+  scopeRows: readonly ScopeWithExpiry[],
+  path: string,
+): Promise<ObjectView> {
+  authorizeStorage(scopeRows, 'storage:read')
+  const resolved = await resolveObject(ctx, branch.ancestry, path)
+  if (resolved === null) {
+    throw notFound('Object')
+  }
+  return toView(resolved)
+}
+
+/** Resolve `path` and mint a short-TTL presigned GET so the client downloads the bytes directly
+ * from the store (never through the API). 404 if absent or shadowed by a tombstone. */
+export async function downloadObject(
+  ctx: AppContext,
+  branch: Branch,
+  scopeRows: readonly ScopeWithExpiry[],
+  path: string,
+): Promise<DownloadView> {
+  authorizeStorage(scopeRows, 'storage:read')
+  const resolved = await resolveObject(ctx, branch.ancestry, path)
+  if (resolved === null) {
+    throw notFound('Object')
+  }
+  const url = await ctx.blobProvider.presignGet(resolved.physicalKey, {
+    expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds,
+  })
+  return { ...toView(resolved), url, expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds }
+}
+
+/** Prefix listing of the branch's effective view (metadata only, no physical keys), paginated. */
+export async function listObjectsForAgent(
+  ctx: AppContext,
+  branch: Branch,
+  scopeRows: readonly ScopeWithExpiry[],
+  input: { prefix?: string; after?: string; limit?: number },
+): Promise<{ objects: ObjectView[]; nextCursor: string | null }> {
+  authorizeStorage(scopeRows, 'storage:read')
+  const limit = Math.min(Math.max(1, input.limit ?? STORAGE_LIMITS.defaultListLimit), STORAGE_LIMITS.maxListLimit)
+  const res = await listObjects(ctx, branch.ancestry, input.prefix ?? '', { after: input.after, limit })
+  return { objects: res.objects.map(toView), nextCursor: res.nextCursor }
 }

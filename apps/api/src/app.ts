@@ -12,6 +12,7 @@ import { meRoutes } from './routes/me.ts'
 import { organizationRoutes } from './routes/organizations.ts'
 import { projectRoutes } from './routes/projects.ts'
 import { scopeRequestRoutes } from './routes/scope-requests.ts'
+import { storageApiRoutes } from './routes/storage.ts'
 
 export interface AppOptions {
   corsOrigins?: string[]
@@ -58,6 +59,7 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
     .use(agentRoutes(ctx))
     .use(scopeRequestRoutes(ctx))
     .use(agentApiRoutes(ctx))
+    .use(storageApiRoutes(ctx))
 
   // Mounted for its runtime side effect only; deliberately kept out of the exported
   // `App` type so it never becomes part of the typed client contract.

@@ -68,6 +68,7 @@ export type { ScopeRole } from './roles.ts'
 export {
   RESOURCE_LIMITS,
   QUERY_LIMITS,
+  STORAGE_LIMITS,
   RATE_LIMITS,
   MAX_CONCURRENT_QUERIES_PER_BRANCH,
   byteLength,

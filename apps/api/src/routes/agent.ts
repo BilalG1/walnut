@@ -1,15 +1,13 @@
 import { effectiveScopes, MAX_CONCURRENT_QUERIES_PER_BRANCH } from '@walnut/core'
 import { Elysia, t } from 'elysia'
-import { extractBearer } from '../auth/bearer.ts'
 import type { AppContext } from '../context.ts'
-import { HttpError, insufficientScope, unauthorized } from '../errors.ts'
+import { HttpError, insufficientScope } from '../errors.ts'
 import { enforceRate } from '../rate-limit.ts'
 import { toBranchView, toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
 import {
   agentBranchCreateScopes,
   agentScopesForBranch,
-  findAgentByKey,
   getAgentHomeProject,
   resolveAgentProject,
 } from '../services/agents.ts'
@@ -17,20 +15,11 @@ import { createBranchForAgent, listBranchesInternal, listProjectsInOrg, resolveB
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
 import { uuid } from '../validation.ts'
+import { agentBearerResolver } from './agent-bearer.ts'
 
 export function agentApiRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/agent/v1' })
-    .resolve(async ({ headers }) => {
-      const token = extractBearer(headers.authorization)
-      if (token === undefined) {
-        throw unauthorized('Missing agent API key. Pass it as `Authorization: Bearer <key>`.')
-      }
-      const agent = await findAgentByKey(ctx, token)
-      if (agent === undefined) {
-        throw unauthorized('Invalid agent API key.')
-      }
-      return { agent }
-    })
+    .resolve(agentBearerResolver(ctx))
     .get('/identity', async ({ agent }) => {
       // An org-scoped agent has no single project; report its home project (the first it
       // was granted) and that grant's scopes, plus the org it belongs to.
