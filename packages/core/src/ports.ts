@@ -3,9 +3,10 @@
  * strings that embed one — from a single `PORT_PREFIX` knob.
  *
  * Convention: `PORT_PREFIX` is a two-digit string and each service's port is the
- * prefix followed by a two-digit offset (web = `00`, api = `01`, postgres = `02`).
- * We *concatenate strings* rather than do arithmetic so this code and the
- * docker-compose interpolation (`${PORT_PREFIX}02`) derive byte-identical ports.
+ * prefix followed by a two-digit offset (web = `00`, api = `01`, postgres = `02`,
+ * minio = `03`, minio-console = `04`). We *concatenate strings* rather than do
+ * arithmetic so this code and the docker-compose interpolation (`${PORT_PREFIX}02`)
+ * derive byte-identical ports.
  *
  * Default prefix `30` reproduces the historical `3000 / 3001 / 3002` layout, so
  * leaving `PORT_PREFIX` unset changes nothing. Pick a different two-digit prefix
@@ -20,6 +21,10 @@ export const PORT_OFFSETS = {
   web: '00',
   api: '01',
   postgres: '02',
+  /** MinIO S3 API — the local object store backing per-branch storage. */
+  minio: '03',
+  /** MinIO web console (operator UI), handy for eyeballing blobs in dev. */
+  minioConsole: '04',
 } as const
 
 export type PortService = keyof typeof PORT_OFFSETS
@@ -73,4 +78,11 @@ export function localPostgresUrl(options: LocalDbUrlOptions): string {
 /** Build a local `http://host:port` URL for a service whose port derives from the prefix. */
 export function localServiceUrl(service: PortService, prefix?: string, host = 'localhost'): string {
   return `http://${host}:${portFor(service, prefix)}`
+}
+
+/** The local MinIO S3 endpoint (`http://host:<prefix>03`) the `local` blob provider targets —
+ * the storage analog of {@link localPostgresUrl}. Production points at R2 via an explicit
+ * endpoint instead; this keeps the single-knob promise for offline/test runs. */
+export function localS3Endpoint(prefix?: string, host = 'localhost'): string {
+  return localServiceUrl('minio', prefix, host)
 }

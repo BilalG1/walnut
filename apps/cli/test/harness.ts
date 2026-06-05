@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { treaty } from '@elysiajs/eden'
 import { createApp, createContext, createTestAuth, ensureSeed, type OwnedContext } from '@walnut/api/testing'
 import { createRateLimiter, SYSTEM_USER_ID } from '@walnut/core'
+import { localS3Endpoint } from '@walnut/core/ports'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
@@ -148,9 +149,18 @@ export async function createCliHarness(): Promise<CliHarness> {
       localAdminUrl: ADMIN_URL,
       localDbPrefix: DB_PREFIX,
     },
+    {
+      kind: 'local',
+      endpoint: process.env.STORAGE_ENDPOINT?.trim() || localS3Endpoint(process.env.PORT_PREFIX),
+      bucket: process.env.STORAGE_BUCKET?.trim() || 'walnut',
+      accessKeyId: process.env.STORAGE_ACCESS_KEY_ID?.trim() || 'walnut',
+      secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY?.trim() || 'walnutminio',
+      region: 'auto',
+    },
     verifier,
     rateLimiter,
   )
+  await ctx.blobProvider.ensureBucket()
   const app = createApp(ctx)
   // Dashboard calls (project/agent creation, scope approval) run as the seeded user.
   const systemToken = await mintToken(SYSTEM_USER_ID, { email: 'system@walnut.cloud', name: 'System' })

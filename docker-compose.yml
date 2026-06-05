@@ -23,6 +23,32 @@ services:
       timeout: 5s
       retries: 10
 
+  # MinIO — the local, S3-compatible object store backing per-branch storage. Prod uses
+  # Cloudflare R2; both speak S3, so the same blob code path runs here. The bucket is
+  # created in-process by the blob provider's ensureBucket() on API/test startup, so no
+  # init container is needed. S3 API on <prefix>03, web console on <prefix>04.
+  minio:
+    image: minio/minio:latest
+    container_name: walnut-minio-${PORT_PREFIX:-30}
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: walnut
+      MINIO_ROOT_PASSWORD: walnutminio
+    command: server /data --console-address ":9001"
+    ports:
+      # host:container — S3 API on <prefix>03 (default 3003), console on <prefix>04 (3004)
+      - "${PORT_PREFIX:-30}03:9000"
+      - "${PORT_PREFIX:-30}04:9001"
+    volumes:
+      - walnut-miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   walnut-pgdata:
     name: walnut-pgdata-${PORT_PREFIX:-30}
+  walnut-miniodata:
+    name: walnut-miniodata-${PORT_PREFIX:-30}

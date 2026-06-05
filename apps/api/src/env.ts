@@ -1,5 +1,5 @@
-import type { ProviderConfig, ProviderKind } from '@walnut/core'
-import { localPostgresUrl, localServiceUrl, portFor } from '@walnut/core/ports'
+import type { BlobProviderConfig, BlobProviderKind, ProviderConfig, ProviderKind } from '@walnut/core'
+import { localPostgresUrl, localS3Endpoint, localServiceUrl, portFor } from '@walnut/core/ports'
 
 export interface AuthEnv {
   /** Hexclave project id; also the access-token audience. */
@@ -21,8 +21,45 @@ export interface Env {
   databaseUrl: string
   corsOrigins: string[]
   provider: ProviderConfig
+  /** Object-store config for per-branch storage (MinIO locally, R2 in prod). */
+  blob: BlobProviderConfig
   auth: AuthEnv
   devAuth: DevAuthEnv
+}
+
+/**
+ * Resolve the blob (object-store) provider config. `local` mirrors the database `local`
+ * provider: everything derives from PORT_PREFIX (the MinIO endpoint) with the docker-compose
+ * root credentials as defaults, so offline/test runs need no extra env. `r2` is production —
+ * it requires an explicit endpoint, bucket, and credentials (fail closed if any is missing).
+ * Individual `STORAGE_*` vars override the derived defaults, same posture as `DATABASE_URL`.
+ */
+function loadBlobConfig(prefix: string | undefined): BlobProviderConfig {
+  const kind = (process.env.STORAGE_PROVIDER ?? 'local') as BlobProviderKind
+  if (kind !== 'local' && kind !== 'r2') {
+    throw new Error(`STORAGE_PROVIDER must be "local" or "r2", got "${kind}"`)
+  }
+  const region = process.env.STORAGE_REGION?.trim() || 'auto'
+  if (kind === 'r2') {
+    // Production: every value is explicit — no `walnut`/MinIO defaults leak into prod.
+    return {
+      kind,
+      endpoint: required('STORAGE_ENDPOINT'),
+      bucket: required('STORAGE_BUCKET'),
+      accessKeyId: required('STORAGE_ACCESS_KEY_ID'),
+      secretAccessKey: required('STORAGE_SECRET_ACCESS_KEY'),
+      region,
+    }
+  }
+  // Local: derive everything from PORT_PREFIX + the docker-compose MinIO root credentials.
+  return {
+    kind,
+    endpoint: process.env.STORAGE_ENDPOINT?.trim() || localS3Endpoint(prefix),
+    bucket: process.env.STORAGE_BUCKET?.trim() || 'walnut',
+    accessKeyId: process.env.STORAGE_ACCESS_KEY_ID?.trim() || 'walnut',
+    secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY?.trim() || 'walnutminio',
+    region,
+  }
 }
 
 function required(name: string): string {
@@ -77,6 +114,7 @@ export function loadEnv(): Env {
       localAdminUrl: process.env.LOCAL_PG_ADMIN_URL?.trim() || localPostgresUrl({ database: 'postgres', prefix }),
       neonApiKey: process.env.NEON_API_KEY,
     },
+    blob: loadBlobConfig(prefix),
     auth: {
       projectId: required('HEXCLAVE_PROJECT_ID'),
       apiBaseUrl: process.env.HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com',

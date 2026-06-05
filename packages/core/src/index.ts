@@ -43,8 +43,19 @@ export {
   portFor,
   localPostgresUrl,
   localServiceUrl,
+  localS3Endpoint,
 } from './ports.ts'
 export type { PortService, LocalDbUrlOptions } from './ports.ts'
+
+export { createBlobProvider, isSha256, physicalKey, projectKeyPrefix, stagingKey } from './blob/index.ts'
+export type {
+  BlobHead,
+  BlobProvider,
+  BlobProviderConfig,
+  BlobProviderKind,
+  PresignOptions,
+  PresignPutOptions,
+} from './blob/index.ts'
 
 export { DEFAULT_WALNUT_API_URL, DEFAULT_WALNUT_WEB_URL } from './urls.ts'
 

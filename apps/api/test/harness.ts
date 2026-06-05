@@ -1,6 +1,6 @@
 import { treaty } from '@elysiajs/eden'
 import { createRateLimiter, SYSTEM_USER_ID } from '@walnut/core'
-import { localPostgresUrl } from '@walnut/core/ports'
+import { localPostgresUrl, localS3Endpoint } from '@walnut/core/ports'
 import { openDb, runMigrations } from '@walnut/db'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
@@ -20,6 +20,18 @@ function withDatabase(adminUrl: string, db: string): string {
 }
 
 const TEST_DB_URL = withDatabase(ADMIN_URL, TEST_DB)
+
+/** Blob store for tests: the local MinIO (derived from PORT_PREFIX) with the docker-compose
+ * root credentials. Keys are project-prefixed, so the shared `walnut` bucket stays isolated
+ * per (random) project across suites. */
+const TEST_BLOB_CONFIG = {
+  kind: 'local' as const,
+  endpoint: process.env.STORAGE_ENDPOINT?.trim() || localS3Endpoint(process.env.PORT_PREFIX),
+  bucket: process.env.STORAGE_BUCKET?.trim() || 'walnut',
+  accessKeyId: process.env.STORAGE_ACCESS_KEY_ID?.trim() || 'walnut',
+  secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY?.trim() || 'walnutminio',
+  region: 'auto',
+}
 
 type ApiClient = ReturnType<typeof treaty<ReturnType<typeof createApp>>>
 
@@ -118,7 +130,9 @@ export async function createHarness(): Promise<Harness> {
   // Frozen-clock limiter so rate-limit tests are deterministic (no refill mid-test); reset()
   // clears its buckets between cases so a test's requests never spill into the next.
   const rateLimiter = createRateLimiter(() => 1_000_000)
-  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL }, verifier, rateLimiter)
+  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL }, TEST_BLOB_CONFIG, verifier, rateLimiter)
+  // Storage e2e tests upload/download real bytes through MinIO, so the bucket must exist.
+  await ctx.blobProvider.ensureBucket()
   const app = createApp(ctx)
 
   // Every request from `api` is authed as the seeded system user, so existing tests

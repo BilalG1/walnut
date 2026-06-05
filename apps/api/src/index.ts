@@ -11,9 +11,11 @@ initSentry()
 
 const env = loadEnv()
 const verifier = createRemoteVerifier({ projectId: env.auth.projectId, apiBaseUrl: env.auth.apiBaseUrl })
-const ctx = createContext(env.databaseUrl, env.provider, verifier)
+const ctx = createContext(env.databaseUrl, env.provider, env.blob, verifier)
 
 await ensureSeed(ctx)
+// Ensure the storage bucket exists before serving — idempotent, so safe on every boot.
+await ctx.blobProvider.ensureBucket()
 
 let devLogin: HexclaveServerClient | undefined
 if (env.devAuth.enabled) {
