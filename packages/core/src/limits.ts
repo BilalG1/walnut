@@ -66,21 +66,35 @@ export const QUERY_LIMITS = {
 } as const
 
 /**
- * Caps for per-branch object storage. Like the DB limits these bound a shared backend (one R2
- * account, with no egress fees but real storage + operation costs and account-wide quotas). The
- * key design rule: **quota counts the physical bytes a branch OWNS (its divergence rows), never
- * inherited bytes** — otherwise every branch of a big dataset would be instantly "over quota" and
- * the O(1)-branch promise would be useless. Inherited bytes are free to the brancher; the owning
- * branch bears them, and on branch delete its refcounts drop so GC reclaims.
+ * Caps for object storage. Like the DB limits these bound a shared backend (one R2 account, with
+ * no egress fees but real storage + operation costs and account-wide quotas). The key design rule:
+ * **quota counts the physical bytes a branch OWNS (its divergence rows), never inherited bytes** —
+ * otherwise every branch of a big dataset would be instantly "over quota" and the O(1)-branch
+ * promise would be useless. Inherited bytes are free to the brancher; the owning branch bears them,
+ * and on branch delete its refcounts drop so GC reclaims.
+ *
+ * Caps come in two tiers, mirroring the DB `RESOURCE_LIMITS` shape: a **per-branch** cap bounds any
+ * one branch, and a **per-org** backstop bounds the whole org's owned footprint — so many branches
+ * each under their own cap can't sum past the org's share of the shared R2 account (the org is the
+ * tenant anchor, as everywhere else). The per-org ceilings sit below the naive product of the
+ * per-branch cap × {@link RESOURCE_LIMITS.branchesPerOrg}, deliberately (same posture as
+ * `branchesPerOrg` vs `projectsPerOrg × branchesPerProject`): the backstop, not the multiplication,
+ * is the real ceiling. Both org sums span every branch in the org via the manifest's owner→branch
+ * →project→org chain.
  */
 export const STORAGE_LIMITS = {
   /** Divergence rows (writes + tombstones) a single branch may own. Bounds manifest growth. */
-  maxObjectsPerBranch: 10_000,
+  maxObjectsPerBranch: 1_000,
+  /** Divergence rows summed across every branch in an org — the org-wide manifest backstop. */
+  maxObjectsPerOrg: 10_000,
   /** Largest single blob, in bytes (5 GiB). Checked before minting an upload presign. */
   maxBlobBytes: 5 * 1024 * 1024 * 1024,
-  /** Total physical bytes a branch may OWN (sum over its live divergence rows). Inherited bytes
-   * don't count — see the note above. */
-  maxOwnedBytesPerBranch: 50 * 1024 * 1024 * 1024,
+  /** Total physical bytes a branch may OWN (sum over its live divergence rows; 1 GiB). Inherited
+   * bytes don't count — see the note above. */
+  maxOwnedBytesPerBranch: 1 * 1024 * 1024 * 1024,
+  /** Total physical bytes an org may OWN, summed over the live divergence rows of all its branches
+   * (10 GiB) — the org-wide cost backstop on the shared R2 account. Inherited bytes don't count. */
+  maxOwnedBytesPerOrg: 10 * 1024 * 1024 * 1024,
   /** Max logical-key (path) length, in characters. */
   maxPathLength: 1024,
   /** TTL of a minted presigned URL, in seconds — kept short so a leaked URL expires fast. */

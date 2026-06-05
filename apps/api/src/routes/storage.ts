@@ -129,9 +129,9 @@ export function storageApiRoutes(ctx: AppContext) {
       '/commit',
       async ({ agent, body }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
-        const { branch, scopeRows } = await resolveTarget(ctx, agent, body.projectId, body.branch)
+        const { project, branch, scopeRows } = await resolveTarget(ctx, agent, body.projectId, body.branch)
         assertStorageScope(scopeRows, 'storage:write')
-        return commitUpload(ctx, branch, { path: body.path })
+        return commitUpload(ctx, project, branch, { path: body.path })
       },
       {
         body: t.Object({

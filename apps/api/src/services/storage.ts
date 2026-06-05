@@ -17,7 +17,7 @@
  * visible; an in-flight (`pending`) upload never shows up in a read.
  */
 import { effectiveScopes, isSha256, physicalKey, type ScopeWithExpiry, type StorageScope, STORAGE_LIMITS } from '@walnut/core'
-import { type Branch, physicalObjects, type Project, storageObjects } from '@walnut/db'
+import { type Branch, branches, physicalObjects, type Project, projects, storageObjects } from '@walnut/db'
 import { and, count, eq, sql } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
 import { badRequest, HttpError, insufficientScope, limitExceeded, notFound } from '../errors.ts'
@@ -329,26 +329,40 @@ async function promoteStaged(
 }
 
 /**
- * Enforce the per-branch storage caps for a write of `addBytes` at `path` — count-then-insert,
- * like the resource caps. Quota counts only what this branch OWNS (its divergence rows), never
- * inherited bytes, so branching a big dataset doesn't make every branch instantly over quota.
+ * Enforce the storage caps for a write of `addBytes` at `path` — count-then-insert, like the
+ * resource caps. Quota counts only what a branch OWNS (its divergence rows), never inherited bytes,
+ * so branching a big dataset doesn't make every branch instantly over quota.
+ *
+ * Two tiers are checked: a **per-branch** cap (bounds one branch) and a **per-org** backstop (sums
+ * over every branch in the org, via owner→branch→project→org), mirroring the DB resource caps. The
+ * org is the tenant anchor on the shared R2 account.
  *
  * Called twice: at upload time against the *client-declared* size (an early, best-effort reject),
  * and again at commit against the *real* size from HEAD (the authoritative check — without it the
  * size limits would be decorative, since a presigned PUT can carry any number of bytes).
  *
- * - The **object-count** cap counts ALL of the branch's rows (pending + committed + tombstones), so
- *   a flood of presigned-but-never-completed uploads can't slip past it.
+ * - The **object-count** cap counts ALL rows (pending + committed + tombstones), so a flood of
+ *   presigned-but-never-completed uploads can't slip past it.
  * - The **owned-bytes** cap counts only *committed, non-tombstone* rows (real stored bytes); a
  *   pending row's declared size is unverified and isn't "owned" until its bytes actually land.
+ *
+ * `replacedBytes` (the committed row being overwritten on this branch) is subtracted from both the
+ * branch and the org owned sums — an overwrite frees its old bytes at every tier it counted in.
  */
-async function enforceBranchStorageCaps(ctx: AppContext, branchId: string, path: string, addBytes: number): Promise<void> {
+async function enforceStorageCaps(
+  ctx: AppContext,
+  project: Project,
+  branchId: string,
+  path: string,
+  addBytes: number,
+): Promise<void> {
+  const orgId = project.organizationId
   const [existing] = await ctx.db
     .select({ size: storageObjects.size, state: storageObjects.state })
     .from(storageObjects)
     .where(and(eq(storageObjects.ownerBranchId, branchId), eq(storageObjects.path, path)))
     .limit(1)
-  // Object-count cap — a brand-new path adds a row; overwriting an existing owned path doesn't.
+  // Object-count caps — a brand-new path adds a row; overwriting an existing owned path doesn't.
   if (existing === undefined) {
     const [{ n } = { n: 0 }] = await ctx.db
       .select({ n: count() })
@@ -361,9 +375,23 @@ async function enforceBranchStorageCaps(ctx: AppContext, branchId: string, path:
         scope: 'branch',
       })
     }
+    const [{ n: orgN } = { n: 0 }] = await ctx.db
+      .select({ n: count() })
+      .from(storageObjects)
+      .innerJoin(branches, eq(storageObjects.ownerBranchId, branches.id))
+      .innerJoin(projects, eq(branches.projectId, projects.id))
+      .where(eq(projects.organizationId, orgId))
+    if (orgN >= STORAGE_LIMITS.maxObjectsPerOrg) {
+      throw limitExceeded(`This org has reached its limit of ${STORAGE_LIMITS.maxObjectsPerOrg} stored objects.`, {
+        limit: 'storage_objects_per_org',
+        max: STORAGE_LIMITS.maxObjectsPerOrg,
+        scope: 'org',
+      })
+    }
   }
-  // Owned-bytes cap — sum of the branch's committed, non-tombstone rows, minus the committed row
-  // being replaced (a pending row isn't in the sum, so there's nothing to subtract for it).
+  // Owned-bytes caps — sum of committed, non-tombstone rows, minus the committed row being replaced
+  // (a pending row isn't in the sum, so there's nothing to subtract for it).
+  const replacedBytes = existing?.state === 'committed' ? Number(existing.size) : 0
   const [{ s } = { s: 0 }] = await ctx.db
     .select({ s: sql<string>`coalesce(sum(${storageObjects.size}), 0)` })
     .from(storageObjects)
@@ -374,12 +402,28 @@ async function enforceBranchStorageCaps(ctx: AppContext, branchId: string, path:
         eq(storageObjects.state, 'committed'),
       ),
     )
-  const replacedBytes = existing?.state === 'committed' ? Number(existing.size) : 0
-  const ownedNow = Number(s) - replacedBytes
-  if (ownedNow + addBytes > STORAGE_LIMITS.maxOwnedBytesPerBranch) {
+  if (Number(s) - replacedBytes + addBytes > STORAGE_LIMITS.maxOwnedBytesPerBranch) {
     throw limitExceeded(
       `This branch would exceed its storage quota of ${STORAGE_LIMITS.maxOwnedBytesPerBranch} owned bytes.`,
       { limit: 'storage_owned_bytes_per_branch', max: STORAGE_LIMITS.maxOwnedBytesPerBranch, scope: 'branch' },
+    )
+  }
+  const [{ s: orgS } = { s: 0 }] = await ctx.db
+    .select({ s: sql<string>`coalesce(sum(${storageObjects.size}), 0)` })
+    .from(storageObjects)
+    .innerJoin(branches, eq(storageObjects.ownerBranchId, branches.id))
+    .innerJoin(projects, eq(branches.projectId, projects.id))
+    .where(
+      and(
+        eq(projects.organizationId, orgId),
+        eq(storageObjects.deleted, false),
+        eq(storageObjects.state, 'committed'),
+      ),
+    )
+  if (Number(orgS) - replacedBytes + addBytes > STORAGE_LIMITS.maxOwnedBytesPerOrg) {
+    throw limitExceeded(
+      `This org would exceed its storage quota of ${STORAGE_LIMITS.maxOwnedBytesPerOrg} owned bytes.`,
+      { limit: 'storage_owned_bytes_per_org', max: STORAGE_LIMITS.maxOwnedBytesPerOrg, scope: 'org' },
     )
   }
 }
@@ -414,7 +458,7 @@ export async function createUpload(
     throw badRequest('Invalid size: expected a non-negative integer.')
   }
   assertWithinBlobSize(input.size)
-  await enforceBranchStorageCaps(ctx, branch.id, input.path, input.size)
+  await enforceStorageCaps(ctx, project, branch.id, input.path, input.size)
 
   const key = physicalKey(project.id, input.sha256)
   const contentType = input.contentType ?? null
@@ -433,7 +477,7 @@ export async function createUpload(
       // Dedup hit: re-check caps against the REAL size, not the client-declared one (a client
       // could declare a tiny size while pointing at an existing large key to slip the quota).
       assertWithinBlobSize(head.size)
-      await enforceBranchStorageCaps(ctx, branch.id, input.path, head.size)
+      await enforceStorageCaps(ctx, project, branch.id, input.path, head.size)
       // The bytes already exist — commit straight into the committed view (atomic; clears any
       // in-flight staging) so an overwrite-by-dedup never exposes an intermediate state.
       await upsertCommitted(ctx, branch.id, input.path, {
@@ -464,6 +508,7 @@ export async function createUpload(
  */
 export async function commitUpload(
   ctx: AppContext,
+  project: Project,
   branch: Branch,
   input: { path: string },
 ): Promise<ObjectView> {
@@ -491,7 +536,7 @@ export async function commitUpload(
   // client declared. Re-enforce the size caps against the REAL HEAD size before committing — this
   // is the authoritative check; the upload-time check on the declared size is only an early reject.
   assertWithinBlobSize(head.size)
-  await enforceBranchStorageCaps(ctx, branch.id, input.path, head.size)
+  await enforceStorageCaps(ctx, project, branch.id, input.path, head.size)
   await ctx.db.update(physicalObjects).set({ size: head.size }).where(eq(physicalObjects.physicalKey, stagedKey))
   // Atomic flip: promote the staged bytes into the committed view (only now does the overwrite
   // become visible to reads), clearing the staging columns.

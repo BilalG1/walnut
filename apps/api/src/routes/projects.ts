@@ -205,9 +205,9 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/branches/:branch/storage/commit',
       async ({ userId, params, body }) => {
-        await getProject(ctx, params.id, userId)
+        const project = await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
-        return commitUpload(ctx, branch, { path: body.path })
+        return commitUpload(ctx, project, branch, { path: body.path })
       },
       { params: branchParams, body: t.Object({ path: t.String({ minLength: 1 }) }) },
     )

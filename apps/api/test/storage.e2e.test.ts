@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { STORAGE_LIMITS } from '@walnut/core'
+import { branches, physicalObjects, storageObjects } from '@walnut/db'
+import { eq } from 'drizzle-orm'
 import { bearer, type ErrorBody, grantResource, h, newAgent, newProject, useHarness } from './support.ts'
 
 useHarness()
@@ -227,6 +230,39 @@ describe('storage — dedup, delete, commit, limits', () => {
     const body = res.error?.value as ErrorBody | undefined
     expect(body?.error).toBe('limit_exceeded')
     expect(body?.limit).toBe('max_blob_bytes')
+  })
+
+  test('the per-org owned-bytes backstop trips across branches, not just per-branch', async () => {
+    // Two projects share the seeded user's org. Seed a fake org-quota-sized committed object
+    // directly on project B's branch (a direct insert bypasses the per-branch cap), then a tiny
+    // real upload on project A — whose own branch is empty — must still be refused by the ORG
+    // backstop. This exercises the owner→branch→project→org sum that the per-branch check can't see.
+    const a = await newProject('orgcap-a')
+    const b = await newProject('orgcap-b')
+    const agent = await newAgent('orgcap-bot')
+    await grantResource(agent.apiKey, 'project', a.id, ['storage:write'])
+
+    const [bBranch] = await h.ctx.db.select({ id: branches.id }).from(branches).where(eq(branches.projectId, b.id)).limit(1)
+    if (bBranch === undefined) throw new Error('project B has no branch')
+    const key = `${b.id}/blobs/${'b'.repeat(64)}`
+    await h.ctx.db.insert(physicalObjects).values({ physicalKey: key, size: STORAGE_LIMITS.maxOwnedBytesPerOrg })
+    await h.ctx.db.insert(storageObjects).values({
+      ownerBranchId: bBranch.id,
+      path: 'big',
+      physicalKey: key,
+      size: STORAGE_LIMITS.maxOwnedBytesPerOrg,
+      state: 'committed',
+      deleted: false,
+    })
+
+    const res = await h.api.agent.v1.storage.upload.post(
+      { path: 'tiny', sha256: 'a'.repeat(64), size: 1 },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('limit_exceeded')
+    expect(body?.limit).toBe('storage_owned_bytes_per_org')
   })
 
   test('an invalid sha256 is rejected with 400', async () => {
