@@ -181,10 +181,11 @@ export async function listObjects(
 // ─── Agent-facing operations ──────────────────────────────────────────────────────────────────
 //
 // The API + presign logic is the SOLE enforcement layer for blobs (object storage has no
-// engine-level backstop like the Postgres scope roles). So every operation authorizes the agent's
-// effective storage scopes on the target branch FIRST, agents only ever name `(branch, path)` and
-// never see a physical key, and reads/writes hand back short-TTL, single-object presigned URLs so
-// the bytes never transit the API.
+// engine-level backstop like the Postgres scope roles). Authorization is the CALLER's job and
+// happens before these run: the agent route asserts the agent's effective storage scope
+// ({@link assertStorageScope}); the dashboard routes authorize by org membership (getProject).
+// Agents only ever name `(branch, path)` and never see a physical key, and reads/writes hand back
+// short-TTL, single-object presigned URLs so the bytes never transit the API.
 
 /** Metadata view of a stored object handed back to agents — never the physical key. */
 export interface ObjectView {
@@ -210,9 +211,10 @@ function toView(o: ResolvedObject): ObjectView {
   return { path: o.path, size: o.size, contentType: o.contentType, etag: o.etag }
 }
 
-/** Authorize the agent's effective storage scopes, or throw the machine-readable 403 that drives
- * the scope-request approval loop (identical shape to the db-query path). */
-function authorizeStorage(scopeRows: readonly ScopeWithExpiry[], required: StorageScope): void {
+/** Assert an agent holds `required` (its effective storage scope), or throw the machine-readable
+ * 403 that drives the scope-request approval loop (identical shape to the db-query path). Called by
+ * the agent route before each op; the dashboard authorizes by org membership instead. */
+export function assertStorageScope(scopeRows: readonly ScopeWithExpiry[], required: StorageScope): void {
   const granted = effectiveScopes(scopeRows)
   if (!granted.includes(required)) {
     throw insufficientScope(
@@ -345,10 +347,8 @@ export async function createUpload(
   ctx: AppContext,
   project: Project,
   branch: Branch,
-  scopeRows: readonly ScopeWithExpiry[],
   input: { path: string; sha256: string; size: number; contentType?: string },
 ): Promise<UploadView> {
-  authorizeStorage(scopeRows, 'storage:write')
   validatePath(input.path)
   if (!isSha256(input.sha256)) {
     throw badRequest('Invalid sha256: expected 64 lowercase hex characters.')
@@ -413,10 +413,8 @@ export async function createUpload(
 export async function commitUpload(
   ctx: AppContext,
   branch: Branch,
-  scopeRows: readonly ScopeWithExpiry[],
   input: { path: string },
 ): Promise<ObjectView> {
-  authorizeStorage(scopeRows, 'storage:write')
   const [row] = await ctx.db
     .select()
     .from(storageObjects)
@@ -459,10 +457,8 @@ export async function commitUpload(
 export async function deleteObject(
   ctx: AppContext,
   branch: Branch,
-  scopeRows: readonly ScopeWithExpiry[],
   input: { path: string },
 ): Promise<{ path: string; deleted: true }> {
-  authorizeStorage(scopeRows, 'storage:delete')
   const resolved = await resolveObject(ctx, branch.ancestry, input.path)
   if (resolved === null) {
     throw notFound('Object')
@@ -482,10 +478,8 @@ export async function deleteObject(
 export async function statObject(
   ctx: AppContext,
   branch: Branch,
-  scopeRows: readonly ScopeWithExpiry[],
   path: string,
 ): Promise<ObjectView> {
-  authorizeStorage(scopeRows, 'storage:read')
   const resolved = await resolveObject(ctx, branch.ancestry, path)
   if (resolved === null) {
     throw notFound('Object')
@@ -498,10 +492,8 @@ export async function statObject(
 export async function downloadObject(
   ctx: AppContext,
   branch: Branch,
-  scopeRows: readonly ScopeWithExpiry[],
   path: string,
 ): Promise<DownloadView> {
-  authorizeStorage(scopeRows, 'storage:read')
   const resolved = await resolveObject(ctx, branch.ancestry, path)
   if (resolved === null) {
     throw notFound('Object')
@@ -513,13 +505,11 @@ export async function downloadObject(
 }
 
 /** Prefix listing of the branch's effective view (metadata only, no physical keys), paginated. */
-export async function listObjectsForAgent(
+export async function listStorageObjects(
   ctx: AppContext,
   branch: Branch,
-  scopeRows: readonly ScopeWithExpiry[],
   input: { prefix?: string; after?: string; limit?: number },
 ): Promise<{ objects: ObjectView[]; nextCursor: string | null }> {
-  authorizeStorage(scopeRows, 'storage:read')
   const limit = Math.min(Math.max(1, input.limit ?? STORAGE_LIMITS.defaultListLimit), STORAGE_LIMITS.maxListLimit)
   const res = await listObjects(ctx, branch.ancestry, input.prefix ?? '', { after: input.after, limit })
   return { objects: res.objects.map(toView), nextCursor: res.nextCursor }

@@ -14,6 +14,7 @@ import { ActivityPage } from '../features/projects/ActivityPage.tsx'
 import { DatabasePage } from '../features/projects/DatabasePage.tsx'
 import { DataPage } from '../features/projects/DataPage.tsx'
 import { OverviewPage } from '../features/projects/OverviewPage.tsx'
+import { StoragePage } from '../features/projects/storage/StoragePage.tsx'
 import { BranchSettingsPage } from '../features/projects/BranchSettingsPage.tsx'
 import { queryClient } from './queryClient.ts'
 
@@ -73,6 +74,7 @@ const projectDatabaseConnectionRoute = createRoute({
   path: 'connection',
   component: DatabasePage,
 })
+const projectStorageRoute = createRoute({ getParentRoute: () => projectRoute, path: 'storage', component: StoragePage })
 const projectActivityRoute = createRoute({ getParentRoute: () => projectRoute, path: 'activity', component: ActivityPage })
 const projectSettingsRoute = createRoute({
   getParentRoute: () => projectRoute,
@@ -94,6 +96,7 @@ const routeTree = rootRoute.addChildren([
     projectRoute.addChildren([
       projectIndexRoute,
       projectDatabaseRoute.addChildren([projectDatabaseDataRoute, projectDatabaseConnectionRoute]),
+      projectStorageRoute,
       projectActivityRoute,
       projectSettingsRoute,
     ]),

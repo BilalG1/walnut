@@ -17,4 +17,6 @@ export const keys = {
     branch === undefined
       ? (['projects', projectId, 'activity'] as const)
       : (['projects', projectId, 'activity', branch] as const),
+  storage: (projectId: string, branch: string, prefix: string) =>
+    ['projects', projectId, 'branches', branch, 'storage', prefix] as const,
 }

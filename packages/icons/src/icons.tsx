@@ -160,3 +160,39 @@ export const MoreHorizontal = createIcon('MoreHorizontal', [
   { tag: 'circle', attrs: { cx: 19, cy: 12, r: 1 } },
   { tag: 'circle', attrs: { cx: 5, cy: 12, r: 1 } },
 ])
+
+// Storage icons (lucide-style) for the per-branch object-storage browser.
+export const HardDrive = createIcon('HardDrive', [
+  { tag: 'line', attrs: { x1: 22, x2: 2, y1: 12, y2: 12 } },
+  {
+    tag: 'path',
+    attrs: { d: 'M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z' },
+  },
+  { tag: 'line', attrs: { x1: 6, x2: 6.01, y1: 16, y2: 16 } },
+  { tag: 'line', attrs: { x1: 10, x2: 10.01, y1: 16, y2: 16 } },
+])
+export const Folder = createIcon('Folder', [
+  {
+    tag: 'path',
+    attrs: { d: 'M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z' },
+  },
+])
+export const File = createIcon('File', [
+  { tag: 'path', attrs: { d: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z' } },
+  { tag: 'path', attrs: { d: 'M14 2v4a2 2 0 0 0 2 2h4' } },
+])
+export const Upload = createIcon('Upload', [
+  { tag: 'path', attrs: { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' } },
+  { tag: 'polyline', attrs: { points: '17 8 12 3 7 8' } },
+  { tag: 'line', attrs: { x1: 12, x2: 12, y1: 3, y2: 15 } },
+])
+export const Download = createIcon('Download', [
+  { tag: 'path', attrs: { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' } },
+  { tag: 'polyline', attrs: { points: '7 10 12 15 17 10' } },
+  { tag: 'line', attrs: { x1: 12, x2: 12, y1: 15, y2: 3 } },
+])
+export const ImageIcon = createIcon('ImageIcon', [
+  { tag: 'rect', attrs: { width: 18, height: 18, x: 3, y: 3, rx: 2, ry: 2 } },
+  { tag: 'circle', attrs: { cx: 9, cy: 9, r: 2 } },
+  { tag: 'path', attrs: { d: 'm21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21' } },
+])

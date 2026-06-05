@@ -1,5 +1,5 @@
 import { Link, useLocation } from '@tanstack/react-router'
-import { Activity, ArrowLeft, Database, LayoutDashboard, Settings } from '@walnut/icons'
+import { Activity, ArrowLeft, Database, HardDrive, LayoutDashboard, Settings } from '@walnut/icons'
 import { cn } from '@walnut/ui'
 import { useOrganizations } from '../../data/queries.ts'
 
@@ -74,6 +74,15 @@ export function ProjectSidebar({ orgId, projectId, branch }: { orgId: string; pr
             </Link>
           </div>
         ) : null}
+
+        <Link
+          to="/orgs/$orgId/projects/$projectId/branches/$branch/storage"
+          params={params}
+          activeProps={{ className: ACTIVE }}
+          inactiveProps={{ className: INACTIVE }}
+        >
+          <HardDrive size={16} /> Storage
+        </Link>
 
         <Link
           to="/orgs/$orgId/projects/$projectId/branches/$branch/activity"

@@ -21,6 +21,14 @@ import {
   resolveBranch,
 } from '../services/projects.ts'
 import { runReadOnlyQuery } from '../services/query.ts'
+import {
+  commitUpload,
+  createUpload,
+  deleteObject,
+  downloadObject,
+  listStorageObjects,
+  statObject,
+} from '../services/storage.ts'
 import { idParams, nameSchema, uuid } from '../validation.ts'
 
 // The branch segment is a plain name (a `text` column), so it stays an unconstrained string;
@@ -131,5 +139,85 @@ export function projectRoutes(ctx: AppContext) {
         return runReadOnlyQuery(branch, body.sql, body.params ?? [])
       },
       { params: branchParams, body: sqlBody },
+    )
+    // ─── Per-branch object storage (the dashboard storage browser) ──────────────────────────────
+    // The same storage service the agent API uses, but authorized by org membership (getProject)
+    // instead of an agent's storage scopes — the dashboard is the human oversight surface. Reads
+    // resolve the branch's effective (nearest-ancestor-wins) view; up/downloads go through
+    // short-TTL presigned URLs so bytes never transit the API (the browser hashes the file and
+    // runs the same two-phase write as the CLI).
+    .get(
+      '/:id/branches/:branch/storage/ls',
+      async ({ userId, params, query }) => {
+        await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return listStorageObjects(ctx, branch, { prefix: query.prefix, after: query.after, limit: query.limit })
+      },
+      {
+        params: branchParams,
+        query: t.Object({
+          prefix: t.Optional(t.String()),
+          after: t.Optional(t.String()),
+          limit: t.Optional(t.Numeric({ minimum: 1 })),
+        }),
+      },
+    )
+    .get(
+      '/:id/branches/:branch/storage/stat',
+      async ({ userId, params, query }) => {
+        await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return statObject(ctx, branch, query.path)
+      },
+      { params: branchParams, query: t.Object({ path: t.String({ minLength: 1 }) }) },
+    )
+    .get(
+      '/:id/branches/:branch/storage/download',
+      async ({ userId, params, query }) => {
+        await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return downloadObject(ctx, branch, query.path)
+      },
+      { params: branchParams, query: t.Object({ path: t.String({ minLength: 1 }) }) },
+    )
+    .post(
+      '/:id/branches/:branch/storage/upload',
+      async ({ userId, params, body }) => {
+        const project = await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return createUpload(ctx, project, branch, {
+          path: body.path,
+          sha256: body.sha256,
+          size: body.size,
+          contentType: body.contentType,
+        })
+      },
+      {
+        params: branchParams,
+        body: t.Object({
+          path: t.String({ minLength: 1 }),
+          sha256: t.String(),
+          size: t.Integer({ minimum: 0 }),
+          contentType: t.Optional(t.String({ maxLength: 255 })),
+        }),
+      },
+    )
+    .post(
+      '/:id/branches/:branch/storage/commit',
+      async ({ userId, params, body }) => {
+        await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return commitUpload(ctx, branch, { path: body.path })
+      },
+      { params: branchParams, body: t.Object({ path: t.String({ minLength: 1 }) }) },
+    )
+    .post(
+      '/:id/branches/:branch/storage/delete',
+      async ({ userId, params, body }) => {
+        await getProject(ctx, params.id, userId)
+        const branch = await resolveBranch(ctx, params.id, params.branch)
+        return deleteObject(ctx, branch, { path: body.path })
+      },
+      { params: branchParams, body: t.Object({ path: t.String({ minLength: 1 }) }) },
     )
 }

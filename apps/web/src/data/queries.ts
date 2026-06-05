@@ -319,6 +319,80 @@ export function useDeleteBranch(projectId: string) {
   })
 }
 
+// ─── Storage (the dashboard storage browser) ──────────────────────────────────────────────────
+
+/** List a branch's effective object view under `prefix` (nearest-ancestor-wins). For the PoC the
+ * browser fetches a generous page and groups/filters client-side. */
+export function useStorageObjects(projectId: string, branch: string, prefix = '') {
+  return useQuery({
+    queryKey: keys.storage(projectId, branch, prefix),
+    queryFn: () =>
+      unwrap(
+        api.api
+          .projects({ id: projectId })
+          .branches({ branch })
+          .storage.ls.get({ query: { ...(prefix === '' ? {} : { prefix }), limit: 1000 } }),
+      ),
+  })
+}
+
+/** Hex sha256 of the file's bytes — the content address the two-phase upload needs. */
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Upload a browser File to `path` on the branch: hash it, run the two-phase write (presign PUT +
+ * commit, or an immediate dedup commit), then refresh the listing. Bytes go straight to the store. */
+export function useStorageUpload(projectId: string, branch: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ file, path }: { file: File; path: string }) => {
+      const bytes = await file.arrayBuffer()
+      const sha256 = await sha256Hex(bytes)
+      const started = await unwrap(
+        api.api
+          .projects({ id: projectId })
+          .branches({ branch })
+          .storage.upload.post({
+            path,
+            sha256,
+            size: file.size,
+            ...(file.type === '' ? {} : { contentType: file.type }),
+          }),
+      )
+      if (started.status === 'upload') {
+        const put = await fetch(started.url, { method: 'PUT', body: file })
+        if (!put.ok) {
+          throw new Error(`Upload failed with status ${put.status}.`)
+        }
+        await unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.commit.post({ path }))
+      }
+      return { path }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['projects', projectId, 'branches', branch, 'storage'] })
+    },
+  })
+}
+
+/** Delete (tombstone) an object on the branch, then refresh the listing. */
+export function useStorageDelete(projectId: string, branch: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (path: string) =>
+      unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.delete.post({ path })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['projects', projectId, 'branches', branch, 'storage'] })
+    },
+  })
+}
+
+/** Resolve a short-TTL presigned GET URL for an object (used for preview/download on click). */
+export function fetchStorageDownload(projectId: string, branch: string, path: string) {
+  return unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.download.get({ query: { path } }))
+}
+
 /** Create a project in the currently-viewed org and refresh that org's list. */
 export function useCreateProject(orgId: string) {
   const qc = useQueryClient()

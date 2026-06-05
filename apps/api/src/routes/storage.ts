@@ -7,11 +7,12 @@ import { agentScopesForBranch, resolveAgentProject } from '../services/agents.ts
 import { resolveBranch } from '../services/projects.ts'
 import { agentBearerResolver } from './agent-bearer.ts'
 import {
+  assertStorageScope,
   commitUpload,
   createUpload,
   deleteObject,
   downloadObject,
-  listObjectsForAgent,
+  listStorageObjects,
   statObject,
 } from '../services/storage.ts'
 import { uuid } from '../validation.ts'
@@ -45,7 +46,8 @@ export function storageApiRoutes(ctx: AppContext) {
       async ({ agent, query }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
         const { branch, scopeRows } = await resolveTarget(ctx, agent, query.projectId, query.branch)
-        return listObjectsForAgent(ctx, branch, scopeRows, {
+        assertStorageScope(scopeRows, 'storage:read')
+        return listStorageObjects(ctx, branch, {
           prefix: query.prefix,
           after: query.after,
           limit: query.limit,
@@ -66,7 +68,8 @@ export function storageApiRoutes(ctx: AppContext) {
       async ({ agent, query }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
         const { branch, scopeRows } = await resolveTarget(ctx, agent, query.projectId, query.branch)
-        return statObject(ctx, branch, scopeRows, query.path)
+        assertStorageScope(scopeRows, 'storage:read')
+        return statObject(ctx, branch, query.path)
       },
       {
         query: t.Object({
@@ -82,7 +85,8 @@ export function storageApiRoutes(ctx: AppContext) {
       async ({ agent, query }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
         const { branch, scopeRows } = await resolveTarget(ctx, agent, query.projectId, query.branch)
-        return downloadObject(ctx, branch, scopeRows, query.path)
+        assertStorageScope(scopeRows, 'storage:read')
+        return downloadObject(ctx, branch, query.path)
       },
       {
         query: t.Object({
@@ -99,7 +103,8 @@ export function storageApiRoutes(ctx: AppContext) {
       async ({ agent, body }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
         const { project, branch, scopeRows } = await resolveTarget(ctx, agent, body.projectId, body.branch)
-        return createUpload(ctx, project, branch, scopeRows, {
+        assertStorageScope(scopeRows, 'storage:write')
+        return createUpload(ctx, project, branch, {
           path: body.path,
           sha256: body.sha256,
           size: body.size,
@@ -125,7 +130,8 @@ export function storageApiRoutes(ctx: AppContext) {
       async ({ agent, body }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
         const { branch, scopeRows } = await resolveTarget(ctx, agent, body.projectId, body.branch)
-        return commitUpload(ctx, branch, scopeRows, { path: body.path })
+        assertStorageScope(scopeRows, 'storage:write')
+        return commitUpload(ctx, branch, { path: body.path })
       },
       {
         body: t.Object({
@@ -141,7 +147,8 @@ export function storageApiRoutes(ctx: AppContext) {
       async ({ agent, body }) => {
         enforceRate(ctx.rateLimiter, 'storagePerAgent', agent.id)
         const { branch, scopeRows } = await resolveTarget(ctx, agent, body.projectId, body.branch)
-        return deleteObject(ctx, branch, scopeRows, { path: body.path })
+        assertStorageScope(scopeRows, 'storage:delete')
+        return deleteObject(ctx, branch, { path: body.path })
       },
       {
         body: t.Object({
