@@ -26,8 +26,11 @@ apps/
   web/   React dashboard. components/, hooks.ts, lib/, api.ts (Eden client)
   cli/   Agent CLI (`walnut`) over the agent-facing API: whoami, project/branch ls, db query, scope
 packages/
-  core/  scopes, SQL scope-classifier, db provider (neon/local), roles, runSql — pure-ish, no app deps
-  db/    Drizzle schema + client + migrations (drizzle/)
+  core/      scopes, SQL scope-classifier, db provider (neon/local), roles, runSql — pure-ish, no app deps
+  db/        Drizzle schema + client + migrations (drizzle/)
+  ui/        shared React component library (consumed by apps/web)
+  icons/     shared icon components
+  db-viewer/ React component library that renders a branch DB's schema + data
 ```
 
 ## Ports — one `PORT_PREFIX` knob (default `30`)
@@ -41,31 +44,16 @@ The derivation lives in `packages/core/src/ports.ts` (`portFor`, `localPostgresU
 drizzle/migrate/reset, the test `harness.ts`, and `docker-compose.yml` all read it.
 **If you add a new port or connection string, derive it from here — never hardcode.**
 
-**Spin up a second, fully-isolated stack** (its own container, volume, network, ports)
-by picking a different two-digit prefix — no other edits:
-
-```bash
-export PORT_PREFIX=41                 # → web 4100 / api 4101 / postgres 4102
-docker compose up -d && bun run db:migrate && bun run dev
-```
-
-Set `PORT_PREFIX` in `.env` or export it in the shell (`docker compose` auto-reads the
-repo-root `.env`). Individual port-bearing vars (`PORT`, `DATABASE_URL`, `CORS_ORIGIN`,
-`VITE_API_URL`, `LOCAL_PG_ADMIN_URL`) still override the derived defaults when set — but
-if you set them, keep them consistent with the prefix or the single-knob promise breaks.
-
-**Before choosing a prefix, confirm you won't collide with another stack.** Each prefix
-owns a `41xx`-style port block plus a `walnut-<prefix>` compose project /
-`walnut-postgres-<prefix>` container / `walnut-pgdata-<prefix>` volume. Reusing a prefix
-another running copy already holds fails on the host-port bind or duplicate container
-name. Check first:
-
-```bash
-docker ps --format '{{.Names}}\t{{.Ports}}' | grep walnut   # which prefixes are taken
-lsof -iTCP:4100-4102 -sTCP:LISTEN                            # are the target ports free
-```
-
-Two digits only (`11`–`99`); a bad prefix throws at startup (`normalizePortPrefix`).
+**Spin up a second, fully-isolated stack** (own container, volume, network, ports) by
+picking a different two-digit prefix — no other edits: `export PORT_PREFIX=41 && docker
+compose up -d && bun run db:migrate && bun run dev`. Set it in `.env` or the shell
+(`docker compose` auto-reads the repo-root `.env`). Each prefix owns a `41xx` port block
+plus `walnut-<prefix>` compose project / container / volume, so reusing a running prefix
+fails on the port bind or duplicate container — check `docker ps | grep walnut` and
+`lsof -iTCP:4100-4102 -sTCP:LISTEN` first. Two digits only (`11`–`99`;
+`normalizePortPrefix` throws otherwise). Individual port-bearing vars (`PORT`,
+`DATABASE_URL`, `CORS_ORIGIN`, `VITE_API_URL`, `LOCAL_PG_ADMIN_URL`) override the derived
+defaults — keep them consistent with the prefix or the single-knob promise breaks.
 
 ## Commands
 
@@ -83,6 +71,10 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 (`local`|`neon`), and optional overrides `DATABASE_URL` / `LOCAL_PG_ADMIN_URL`
 (derived from `PORT_PREFIX` when unset). See `.env.example`.
 
+**Release/CI:** `.github/workflows/release.yml` cross-compiles the `walnut` CLI binary on
+`v*` tags via `scripts/build-release.sh` and publishes to GitHub Releases (`scripts/install.sh`
+is the installer). All three surfaces have optional Sentry error reporting (off unless configured).
+
 ## Conventions (follow these)
 
 - **Lint + typecheck + tests must all pass after every change.** Run `bun run check`.
@@ -98,6 +90,11 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
     lifecycle (`useHarness()`) live in `apps/api/test/support.ts`.
   - Frontend component tests use `@testing-library/react` + happy-dom (preloaded via
     `apps/web/bunfig.toml`).
+  - **Running a single package/file:** web tests need the package cwd — run them via
+    `bun run --filter @walnut/web test` (NOT `bun test apps/web/`, which skips the
+    happy-dom preload and fails). The api/cli suites share one `walnut_test` Postgres, so a
+    parallel `bun run check` can occasionally flake in teardown — re-running the affected
+    suite in isolation self-heals it.
 - **User auth (Hexclave):** dashboard `/api/*` requests carry a Hexclave-issued JWT,
   verified offline via JWKS in `apps/api/src/auth` (`jose`; iss/aud/exp/ES256). Users
   reach projects through **organization membership** — `organizations` /
@@ -126,6 +123,19 @@ bun run db:generate                  # regenerate SQL migrations after schema ch
 - **Never commit directly to `main` by default.** If you're working in a worktree, commit
   to that worktree's branch. Otherwise, create a new branch off `main` and commit there.
   Only commit straight to `main` when I explicitly tell you to. Don't open PRs unless I ask.
+
+## Reviewing your own work before committing
+
+- **For larger / more complex changes, self-review before you commit.** Launch several
+  subagents in parallel to review the diff — typically one for correctness bugs and one for
+  code-quality / simplification / reuse — then triage what they report: fix the issues that
+  are real and valid, and ignore false positives. The goal is to catch problems early, before
+  they land in a commit. **For small, low-risk fixes this is overkill — skip it** and just run
+  `bun run check`.
+- **For large UI changes, record a walkthrough for quick human review.** Use the `agent-browser`
+  CLI (`agent-browser --help`) to drive the dashboard through the affected flows end to end and
+  record the full walkthrough into `/tmp`. When done, give me the full file path to the recording
+  so I can eyeball the result quickly. (Sign in with the dev-login — see User auth above.)
 
 ## The agent model (the point of the project)
 
@@ -201,22 +211,18 @@ rate limit) shared by everyone. Every limit is defined in **one place** —
 three layers:
 
 - **Resource caps (`RESOURCE_LIMITS`)** — durable count ceilings checked with a `COUNT` *before*
-  any provider call: projects/org, branches/project, branches/org, agents/org, pending
-  scope-requests/agent. Enforced in the services (`createProject`/`createBranch`/`createAgent`/
-  `createScopeRequest`); over the limit → **403 `limit_exceeded`** with a machine-readable
-  `{ limit, max, scope }`. Count-then-insert is intentionally best-effort (no transaction), bounded
-  by concurrency. The org is the anchor — today one org == one user (JIT personal orgs).
-- **Per-request caps (`QUERY_LIMITS`)** — applied in the query path: SQL payload > 100 KB → **413
+  any provider call (projects/org, branches/project, branches/org, agents/org, pending
+  scope-requests/agent), enforced in the create services. Over the limit → **403 `limit_exceeded`**
+  with `{ limit, max, scope }`. Count-then-insert is best-effort (no transaction), bounded by
+  concurrency. The org is the anchor — today one org == one user (JIT personal orgs).
+- **Per-request caps (`QUERY_LIMITS`)** — in the query path: SQL payload > 100 KB → **413
   `sql_too_large`** before parsing; `runSql` truncates result sets to 10 k rows / 8 MB and flags
-  `truncated` (a default-LIMIT, not an error) so a `SELECT *` can't OOM the shared API server; the
-  per-statement `statement_timeout` (also here) bounds DB-side work on both the agent scope roles
-  and the viewer's owner connection.
-- **Rate limits (`RATE_LIMITS`) + concurrency** — an in-memory token-bucket limiter on the app
-  context (`createRateLimiter`, `packages/core/src/rate-limit.ts`; `enforceRate` in
-  `apps/api/src/rate-limit.ts`): per-agent query rate, per-user + global provisioning rate,
-  per-agent scope-request and key-rotation rate, plus a per-branch concurrent-query gauge. Over
-  budget → **429 `rate_limited`** with `retryAfterMs` + a `Retry-After` header. Adequate for the
-  single-instance MVP (process-local, lost on restart, with the resource caps as the durable
-  backstop); swap the limiter for a shared store (Redis) behind the same interface to span
-  instances. Tests inject a frozen-clock limiter and `reset()` it per case for determinism.
-  (`authPerIp` is defined but reserved — there's no first-party login endpoint to protect yet.)
+  `truncated` (a default-LIMIT, not an error); a per-statement `statement_timeout` bounds DB-side
+  work on both the scope roles and the viewer's owner connection.
+- **Rate limits (`RATE_LIMITS`) + concurrency** — an in-memory token-bucket limiter
+  (`createRateLimiter`, `packages/core/src/rate-limit.ts`; `enforceRate` in
+  `apps/api/src/rate-limit.ts`) covering per-agent query rate, provisioning, scope-requests,
+  key-rotation, plus a per-branch concurrent-query gauge. Over budget → **429 `rate_limited`** with
+  `retryAfterMs` + `Retry-After`. Process-local (lost on restart, resource caps are the durable
+  backstop); swap in a shared store (Redis) behind the same interface to span instances. Tests inject
+  a frozen-clock limiter and `reset()` per case. (`authPerIp` is reserved — no login endpoint yet.)
