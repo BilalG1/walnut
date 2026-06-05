@@ -11,9 +11,6 @@ export interface StorageObject {
   etag: string | null
 }
 
-/** The three candidate layouts for the storage browser. Switched live so they can be compared. */
-export type StorageView = 'table' | 'explorer' | 'gallery'
-
 export interface ViewContext {
   projectId: string
   branch: string

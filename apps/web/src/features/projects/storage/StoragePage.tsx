@@ -1,19 +1,11 @@
 import { GitBranch, HardDrive, Search, Upload } from '@walnut/icons'
-import { Badge, Button, cn, EmptyState, Input, Spinner } from '@walnut/ui'
+import { Badge, Button, EmptyState, Input, Spinner } from '@walnut/ui'
 import { useRef, useState } from 'react'
 import { useScope } from '../../../app/useScope.ts'
 import { useStorageDelete, useStorageObjects, useStorageUpload } from '../../../data/queries.ts'
 import { PageContainer } from '../../../components/layout/PageContainer.tsx'
-import { type StorageObject, type StorageView, formatBytes } from './common.tsx'
-import { ExplorerView } from './ExplorerView.tsx'
-import { GalleryView } from './GalleryView.tsx'
+import { type StorageObject } from './common.tsx'
 import { TableView } from './TableView.tsx'
-
-const VIEWS: { id: StorageView; label: string }[] = [
-  { id: 'table', label: 'Table' },
-  { id: 'explorer', label: 'Explorer' },
-  { id: 'gallery', label: 'Gallery' },
-]
 
 export function StoragePage() {
   const { projectId, branch } = useScope()
@@ -27,14 +19,12 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
   const { data, isPending, error } = useStorageObjects(projectId, branch)
   const upload = useStorageUpload(projectId, branch)
   const del = useStorageDelete(projectId, branch)
-  const [view, setView] = useState<StorageView>('table')
   const [filter, setFilter] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const objects: StorageObject[] = data?.objects ?? []
   const filtered = filter === '' ? objects : objects.filter((o) => o.path.includes(filter))
-  const totalBytes = objects.reduce((sum, o) => sum + o.size, 0)
 
   function onDelete(path: string): void {
     setDeleting(path)
@@ -63,10 +53,6 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
               {branch}
             </Badge>
           </div>
-          <p className="mt-1 text-sm text-subtle">
-            {objects.length} object{objects.length === 1 ? '' : 's'} · {formatBytes(totalBytes)} · branched O(1) with
-            the database
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -85,24 +71,7 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        {/* View switcher — the three candidate layouts, switchable live. */}
-        <div className="inline-flex rounded-lg border border-line p-0.5">
-          {VIEWS.map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              aria-pressed={view === v.id}
-              onClick={() => setView(v.id)}
-              className={cn(
-                'rounded-md px-3 py-1 text-[13px] font-medium transition-colors',
-                view === v.id ? 'bg-walnut-500/15 text-accent' : 'text-muted hover:text-fg-secondary',
-              )}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
+      <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
         <div className="relative">
           <Search size={14} className="-translate-y-1/2 absolute top-1/2 left-2.5 text-subtle" />
           <Input
@@ -128,12 +97,8 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
           />
         ) : filtered.length === 0 ? (
           <EmptyState title="No matches" hint="No object path contains your filter." />
-        ) : view === 'table' ? (
-          <TableView {...ctx} />
-        ) : view === 'explorer' ? (
-          <ExplorerView {...ctx} />
         ) : (
-          <GalleryView {...ctx} />
+          <TableView {...ctx} />
         )}
       </div>
     </PageContainer>

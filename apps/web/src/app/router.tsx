@@ -11,7 +11,6 @@ import { ProjectsPage } from '../features/orgs/ProjectsPage.tsx'
 import { RequestsPage } from '../features/orgs/RequestsPage.tsx'
 import { SettingsPage } from '../features/orgs/SettingsPage.tsx'
 import { ActivityPage } from '../features/projects/ActivityPage.tsx'
-import { DatabasePage } from '../features/projects/DatabasePage.tsx'
 import { DataPage } from '../features/projects/DataPage.tsx'
 import { OverviewPage } from '../features/projects/OverviewPage.tsx'
 import { StoragePage } from '../features/projects/storage/StoragePage.tsx'
@@ -65,15 +64,9 @@ const orgSettingsRoute = createRoute({ getParentRoute: () => orgRoute, path: 'se
 // Project / branch scope ----------------------------------------------------
 const projectRoute = createRoute({ getParentRoute: () => orgRoute, path: 'projects/$projectId/branches/$branch' })
 const projectIndexRoute = createRoute({ getParentRoute: () => projectRoute, path: '/', component: OverviewPage })
-// "Database" is a section with two subtabs: the data viewer (default/index) and the connection
-// details. The parent route has no component, so it renders its active child via <Outlet/>.
-const projectDatabaseRoute = createRoute({ getParentRoute: () => projectRoute, path: 'database' })
-const projectDatabaseDataRoute = createRoute({ getParentRoute: () => projectDatabaseRoute, path: '/', component: DataPage })
-const projectDatabaseConnectionRoute = createRoute({
-  getParentRoute: () => projectDatabaseRoute,
-  path: 'connection',
-  component: DatabasePage,
-})
+// "Database" is a single tab: the data viewer. The owner connection string lives in a dialog off
+// that page (see DataPage), so there's no longer a connection subtab.
+const projectDatabaseRoute = createRoute({ getParentRoute: () => projectRoute, path: 'database', component: DataPage })
 const projectStorageRoute = createRoute({ getParentRoute: () => projectRoute, path: 'storage', component: StoragePage })
 const projectActivityRoute = createRoute({ getParentRoute: () => projectRoute, path: 'activity', component: ActivityPage })
 const projectSettingsRoute = createRoute({
@@ -95,7 +88,7 @@ const routeTree = rootRoute.addChildren([
     orgSettingsRoute,
     projectRoute.addChildren([
       projectIndexRoute,
-      projectDatabaseRoute.addChildren([projectDatabaseDataRoute, projectDatabaseConnectionRoute]),
+      projectDatabaseRoute,
       projectStorageRoute,
       projectActivityRoute,
       projectSettingsRoute,

@@ -1,7 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { baseName, formatBytes, isImage, typeLabel, type StorageObject } from '../src/features/projects/storage/common.tsx'
-import { ExplorerView } from '../src/features/projects/storage/ExplorerView.tsx'
 import { TableView } from '../src/features/projects/storage/TableView.tsx'
 
 afterEach(cleanup)
@@ -38,21 +37,5 @@ describe('TableView', () => {
     expect(screen.getByText('images/cat.png')).toBeDefined()
     expect(screen.getByText('readme.txt')).toBeDefined()
     expect(screen.getByText('2.0 KB')).toBeDefined()
-  })
-})
-
-describe('ExplorerView', () => {
-  test('groups paths into folders and drills in on click', () => {
-    render(<ExplorerView {...ctx} />)
-    // At root: a folder "images/" and the top-level file "readme.txt".
-    expect(screen.getByText('images/')).toBeDefined()
-    expect(screen.getByText('readme.txt')).toBeDefined()
-    // The image files are nested, not shown at root yet.
-    expect(screen.queryByText('cat.png')).toBeNull()
-
-    fireEvent.click(screen.getByText('images/'))
-    // Now inside images/: the two files appear (path-relative names).
-    expect(screen.getByText('cat.png')).toBeDefined()
-    expect(screen.getByText('dog.jpg')).toBeDefined()
   })
 })
