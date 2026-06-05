@@ -18,10 +18,15 @@ COMMANDS
   branch ls                    List a project's branches (id + name + default).
   branch create <name>         Fork a new branch (--from <branch>; needs branch:create).
   db query <sql | ->           Run SQL against a branch database ("-" reads stdin).
+  storage ls [prefix]          List stored objects under a prefix (needs storage:read).
+  storage cp <src> <dst>       Upload/download via walnut://<path> (needs storage:read/write).
+  storage cat <path>           Print an object's bytes to stdout (needs storage:read).
+  storage rm <path>            Delete an object on the branch (needs storage:delete).
+  storage stat <path>          Show one object's metadata (needs storage:read).
   scope ls                     List granted scopes and pending scope requests.
   scope request <scope...>     Ask the user to grant scopes (--reason to explain).
 
-TARGETING (db query, branch ls, scope request)
+TARGETING (db query, storage, branch ls, scope request)
   An agent is org-scoped and may reach several projects. Commands take an optional
   --project; omit it and the server uses the one project you can reach (and errors,
   listing candidates, if there are several). Use \`walnut project ls\` to find ids and
@@ -111,6 +116,36 @@ EXAMPLES
   walnut db query "select 1"
   walnut db query --project <id> "select 1"
   echo "select * from notes" | walnut db query -`
+}
+
+export function storageHelp(): string {
+  return `walnut storage — per-branch object storage
+
+USAGE
+  walnut storage ls [prefix]              List the branch's objects under a prefix (needs storage:read).
+  walnut storage cp <local> walnut://<p>  Upload a local file (needs storage:write).
+  walnut storage cp walnut://<p> <local>  Download to a local file (needs storage:read).
+  walnut storage cat <path>               Print an object's bytes to stdout (needs storage:read).
+  walnut storage rm <path>                Delete an object on the branch (needs storage:delete).
+  walnut storage stat <path>              Show one object's metadata (needs storage:read).
+
+FLAGS
+  --project <id>     Target project (default: the agent's sole project; required if it
+                     can reach several — the error lists the candidates).
+  --branch <name>    Target branch (default: main).
+
+NOTES
+  Storage branches with the database: a forked branch instantly inherits its parent's objects
+  (an overwrite or delete on the branch shadows the inherited one, leaving the parent untouched).
+  Bytes stream directly to/from the object store via short-lived presigned URLs — never through
+  the API. \`cat\` is text-oriented; use \`cp\` for binary files. A 403 lists how to request scopes.
+
+EXAMPLES
+  walnut storage cp ./model.bin walnut://models/v1.bin
+  walnut storage ls models/
+  walnut storage cat config.json --branch feature-x
+  walnut storage cp walnut://models/v1.bin ./local.bin
+  walnut storage rm old/file.txt`
 }
 
 export function scopeHelp(): string {

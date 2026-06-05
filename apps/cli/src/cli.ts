@@ -1,9 +1,24 @@
 import { parseArgs } from './args.ts'
 import { type ApiClient, makeClient } from './client.ts'
-import { branchCreate, branchLs, dbQuery, login, logout, projectLs, scopeLs, scopeRequest, whoami } from './commands.ts'
+import {
+  branchCreate,
+  branchLs,
+  dbQuery,
+  login,
+  logout,
+  projectLs,
+  scopeLs,
+  scopeRequest,
+  storageCat,
+  storageCp,
+  storageLs,
+  storageRm,
+  storageStat,
+  whoami,
+} from './commands.ts'
 import { resolveConfig } from './config.ts'
 import { EXIT } from './exit.ts'
-import { authHelp, branchHelp, dbHelp, projectHelp, scopeHelp, topLevelHelp } from './help.ts'
+import { authHelp, branchHelp, dbHelp, projectHelp, scopeHelp, storageHelp, topLevelHelp } from './help.ts'
 import { fail, type CliResult } from './output.ts'
 import { VERSION } from './version.ts'
 
@@ -171,6 +186,39 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
         )
       }
       return fail(EXIT.USAGE, 'usage', `Unknown scope subcommand: ${sub}. Try "ls" or "request".`, pretty)
+    }
+
+    case 'storage': {
+      if (wantsHelp) return help(storageHelp())
+      if (sub === undefined) {
+        return fail(EXIT.USAGE, 'usage', 'storage needs a subcommand: ls, cp, cat, rm, or stat.', pretty)
+      }
+      // All storage subcommands share the project/branch target (server applies defaults when unset).
+      const target = { projectId: flag(parsed.options, 'project'), branch: flag(parsed.options, 'branch') }
+      if (sub === 'ls') {
+        return withClient(io, parsed.options, pretty, (client) => storageLs(client, rest[0], target, pretty))
+      }
+      if (sub === 'stat' || sub === 'cat' || sub === 'rm') {
+        const path = rest[0]
+        if (path === undefined) {
+          return fail(EXIT.USAGE, 'usage', `storage ${sub} needs a path. Try: walnut storage ${sub} <path>.`, pretty)
+        }
+        const cmd = sub === 'stat' ? storageStat : sub === 'cat' ? storageCat : storageRm
+        return withClient(io, parsed.options, pretty, (client) => cmd(client, path, target, pretty))
+      }
+      if (sub === 'cp') {
+        const [source, dest] = rest
+        if (source === undefined || dest === undefined) {
+          return fail(
+            EXIT.USAGE,
+            'usage',
+            'storage cp needs a source and a destination. Try: walnut storage cp <local> walnut://<path>.',
+            pretty,
+          )
+        }
+        return withClient(io, parsed.options, pretty, (client) => storageCp(client, source, dest, target, pretty))
+      }
+      return fail(EXIT.USAGE, 'usage', `Unknown storage subcommand: ${sub}. Try ls, cp, cat, rm, or stat.`, pretty)
     }
 
     case 'login': {
