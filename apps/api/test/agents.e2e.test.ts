@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { scopeSetKey } from '@walnut/core'
 import { agentGrants, agentGrantScopes, branchDbRoles, branches } from '@walnut/db'
 import { and, eq } from 'drizzle-orm'
-import { bearer, type ErrorBody, grant, h, newAgent, newProject, personalOrgId, useHarness } from './support.ts'
+import { bearer, type ErrorBody, grant, grantResource, h, newAgent, newProject, personalOrgId, useHarness } from './support.ts'
 
 useHarness()
 
@@ -115,6 +115,137 @@ describe('agent branch API', () => {
     expect(q.status).toBe(422)
     const br = await h.api.agent.v1.branches.get({ headers: bearer(agent.apiKey), query: { projectId: 'nope' } })
     expect(br.status).toBe(422)
+  }, 20_000)
+})
+
+describe('agent branch create', () => {
+  test('POST /agent/v1/branches without branch:create is 403 insufficient_scope', async () => {
+    const project = await newProject('agent-create-denied')
+    const agent = await newAgent('create-denied')
+    // db scopes don't authorize branch creation — only branch:create does.
+    await grant(agent.apiKey, project.id, ['db:read', 'db:write', 'db:ddl'])
+    const res = await h.api.agent.v1.branches.post({ name: 'feature' }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(403)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('insufficient_scope')
+    expect(body?.missingScopes).toEqual(['branch:create'])
+    // No branch was provisioned by the rejected call.
+    const list = await h.api.agent.v1.branches.get({ headers: bearer(agent.apiKey) })
+    expect((list.data ?? []).map((b) => b.name).toSorted()).toEqual(['main'])
+  }, 20_000)
+
+  test('a project-level branch:create grant lets an agent fork the default branch', async () => {
+    const project = await newProject('agent-create-ok')
+    const agent = await newAgent('create-ok')
+    await grantResource(agent.apiKey, 'project', project.id, ['branch:create'])
+    const res = await h.api.agent.v1.branches.post({ name: 'feature' }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(200)
+    expect(res.data?.name).toBe('feature')
+    expect(res.data?.isDefault).toBe(false)
+    expect(res.data?.status).toBe('active')
+    const list = await h.api.agent.v1.branches.get({ headers: bearer(agent.apiKey) })
+    expect((list.data ?? []).map((b) => b.name).toSorted()).toEqual(['feature', 'main'])
+  }, 30_000)
+
+  test('--from forks a named source branch (the copy-on-write source)', async () => {
+    const project = await newProject('agent-create-from')
+    const agent = await newAgent('create-from')
+    const auth = bearer(agent.apiKey)
+    await grantResource(agent.apiKey, 'project', project.id, ['db:read', 'db:write', 'db:ddl', 'branch:create'])
+    // Build state on a non-default branch (created by the agent), then fork *that*.
+    await h.api.agent.v1.branches.post({ name: 'staging' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'CREATE TABLE s (id int)', branch: 'staging' }, { headers: auth })
+    await h.api.agent.v1.query.post({ sql: 'INSERT INTO s VALUES (1)', branch: 'staging' }, { headers: auth })
+    const child = await h.api.agent.v1.branches.post({ name: 'staging-copy', from: 'staging' }, { headers: auth })
+    expect(child.status).toBe(200)
+    // The fork sees staging's seeded row; the project db grant cascades so the agent can query it.
+    const onChild = await h.api.agent.v1.query.post(
+      { sql: 'SELECT count(*)::int AS c FROM s', branch: 'staging-copy' },
+      { headers: auth },
+    )
+    expect(onChild.data?.rows).toEqual([{ c: 1 }])
+  }, 30_000)
+
+  test('an org-level branch:create grant authorizes forks in any project of the org', async () => {
+    const orgId = await personalOrgId()
+    const project = await newProject('agent-create-org')
+    const agent = await newAgent('create-org')
+    await grantResource(agent.apiKey, 'org', orgId, ['branch:create'])
+    const res = await h.api.agent.v1.branches.post(
+      { name: 'org-feature', projectId: project.id },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(200)
+    expect(res.data?.name).toBe('org-feature')
+  }, 30_000)
+
+  test('a branch-level branch:create grant authorizes forking that specific source branch', async () => {
+    const project = await newProject('agent-create-branchlvl')
+    const seed = await h.api.api.projects({ id: project.id }).branches.post({ name: 'seed' })
+    const agent = await newAgent('create-branchlvl')
+    await grantResource(agent.apiKey, 'branch', seed.data?.id ?? '', ['branch:create'])
+    // Forking the granted source branch is allowed...
+    const ok = await h.api.agent.v1.branches.post({ name: 'seed-fork', from: 'seed' }, { headers: bearer(agent.apiKey) })
+    expect(ok.status).toBe(200)
+    // ...but the grant doesn't extend to forking a *different* source (here, main).
+    const denied = await h.api.agent.v1.branches.post({ name: 'main-fork' }, { headers: bearer(agent.apiKey) })
+    expect(denied.status).toBe(403)
+    expect((denied.error?.value as ErrorBody | undefined)?.missingScopes).toEqual(['branch:create'])
+  }, 30_000)
+
+  test('a branch:create grant on a different project does not authorize a fork in another', async () => {
+    const projectA = await newProject('agent-create-a')
+    const projectB = await newProject('agent-create-b')
+    const agent = await newAgent('create-wrong-proj')
+    // The grant is anchored to project A only.
+    await grantResource(agent.apiKey, 'project', projectA.id, ['branch:create'])
+    const denied = await h.api.agent.v1.branches.post(
+      { name: 'feature', projectId: projectB.id },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(denied.status).toBe(403)
+    expect((denied.error?.value as ErrorBody | undefined)?.error).toBe('insufficient_scope')
+    // It still works on the project it was granted on.
+    const ok = await h.api.agent.v1.branches.post(
+      { name: 'feature', projectId: projectA.id },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(ok.status).toBe(200)
+  }, 30_000)
+
+  test('a projectId in another org is a 404 (resolved before the scope check, no existence leak)', async () => {
+    // A project owned by a different user/org; our agent must not reach it even to be told 403.
+    const stranger = await h.clientFor('33333333-3333-3333-3333-333333333333', { email: 'stranger3@example.com' })
+    const foreign = await stranger.api.projects.post({ name: 'foreign' })
+    const agent = await newAgent('create-cross-org')
+    await grantResource(agent.apiKey, 'org', await personalOrgId(), ['branch:create'])
+    const res = await h.api.agent.v1.branches.post(
+      { name: 'feature', projectId: foreign.data?.id ?? '' },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.status).toBe(404)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('not_found')
+  }, 30_000)
+
+  test('a duplicate branch name on the agent route is a 409', async () => {
+    const project = await newProject('agent-create-dup')
+    const agent = await newAgent('create-dup')
+    await grantResource(agent.apiKey, 'project', project.id, ['branch:create'])
+    const first = await h.api.agent.v1.branches.post({ name: 'dev' }, { headers: bearer(agent.apiKey) })
+    expect(first.status).toBe(200)
+    const again = await h.api.agent.v1.branches.post({ name: 'dev' }, { headers: bearer(agent.apiKey) })
+    expect(again.status).toBe(409)
+    expect((again.error?.value as ErrorBody | undefined)?.error).toBe('branch_exists')
+  }, 30_000)
+
+  test('an invalid branch name passes the route schema but is rejected 400 by the core validator', async () => {
+    const project = await newProject('agent-create-badname')
+    const agent = await newAgent('create-badname')
+    await grantResource(agent.apiKey, 'project', project.id, ['branch:create'])
+    // Non-empty and ≤64 chars, so it clears the route schema; the charset check lives in the service.
+    const res = await h.api.agent.v1.branches.post({ name: 'has spaces' }, { headers: bearer(agent.apiKey) })
+    expect(res.status).toBe(400)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('bad_request')
   }, 20_000)
 })
 

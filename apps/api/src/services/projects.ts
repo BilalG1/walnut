@@ -375,11 +375,9 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * Create a branch of a project: a copy-on-write clone of a source branch (the named `from`, or
- * the default) with its own provisioned database and scoped roles. Mirrors {@link createProject}'s
- * provision-then-activate flow: the row is inserted `provisioning` to claim the unique name, the
- * provider clones the database, group roles are set up on it, and the row flips to `active`. On
- * failure the orphaned database is torn down and the row removed so the name is free to retry.
+ * Create a branch as a dashboard user: authorize by org membership (via {@link getProject}),
+ * then run the shared provisioning core. The agent path ({@link createBranchForAgent}) shares
+ * that core but authorizes by the `branch:create` scope instead.
  */
 export async function createBranch(
   ctx: AppContext,
@@ -387,8 +385,43 @@ export async function createBranch(
   userId: string,
   input: { name: string; from?: string },
 ): Promise<Branch> {
-  enforceProvisioningRate(ctx, userId)
   const project = await getProject(ctx, projectId, userId)
+  return provisionBranch(ctx, project, input, userId)
+}
+
+/**
+ * Create a branch as an agent caller. The route has already authorized the agent's
+ * `branch:create` scope on the target, so this just runs the shared core with the agent as the
+ * rate-limit principal (its own provisioning budget, separate from any user's).
+ */
+export async function createBranchForAgent(
+  ctx: AppContext,
+  project: Project,
+  input: { name: string; from?: string },
+  agentId: string,
+): Promise<Branch> {
+  return provisionBranch(ctx, project, input, agentId)
+}
+
+/**
+ * The shared branch-creation core: a copy-on-write clone of a source branch (the named `from`, or
+ * the default) with its own provisioned database and scoped roles. Rate-limits the principal,
+ * validates the name, and enforces the per-project and per-org caps before any provider call.
+ * Mirrors {@link createProject}'s provision-then-activate flow: the row is inserted `provisioning`
+ * to claim the unique name, the provider clones the database, group roles are set up on it, and the
+ * row flips to `active`; on failure the orphaned database is torn down and the row removed so the
+ * name is free to retry. Authorization is the caller's responsibility — both wrappers gate access
+ * before reaching here. `principalKey` is the per-principal provisioning rate-limit bucket key
+ * (a user id or an agent id).
+ */
+async function provisionBranch(
+  ctx: AppContext,
+  project: Project,
+  input: { name: string; from?: string },
+  principalKey: string,
+): Promise<Branch> {
+  enforceProvisioningRate(ctx, principalKey)
+  const projectId = project.id
   if (!BRANCH_NAME_RE.test(input.name)) {
     throw badRequest('Invalid branch name. Use letters, digits, and ._/- (max 64 chars).')
   }

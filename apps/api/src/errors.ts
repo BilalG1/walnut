@@ -1,4 +1,4 @@
-import type { LimitExceededInfo } from '@walnut/core'
+import { type AgentScope, type LimitExceededInfo, missingScopes, SCOPE_DESCRIPTIONS } from '@walnut/core'
 
 export interface HttpErrorBody {
   error: string
@@ -37,6 +37,30 @@ export function badRequest(message: string): HttpError {
  * limit: this is "you hold too many", not "you're going too fast". */
 export function limitExceeded(message: string, info: LimitExceededInfo): HttpError {
   return new HttpError(403, { error: 'limit_exceeded', message, ...info })
+}
+
+/**
+ * An agent lacks a scope an action requires. 403 with the machine-readable contract an agent
+ * branches on: `requiredScopes`/`missingScopes`/`grantedScopes`, a per-missing-scope
+ * `scopeDetails`, and `howToRequest` pointing at the scope-request endpoint. `message` is the
+ * human-readable lead-in (each caller phrases its own action, e.g. "This query…" vs "Creating a
+ * branch…"); the structured fields are identical so a client never has to parse prose.
+ */
+export function insufficientScope(
+  message: string,
+  requiredScopes: readonly AgentScope[],
+  grantedScopes: readonly AgentScope[],
+): HttpError {
+  const missing = missingScopes(grantedScopes, requiredScopes)
+  return new HttpError(403, {
+    error: 'insufficient_scope',
+    message,
+    requiredScopes: [...requiredScopes],
+    missingScopes: missing,
+    grantedScopes: [...grantedScopes],
+    scopeDetails: missing.map((s) => ({ scope: s, description: SCOPE_DESCRIPTIONS[s] })),
+    howToRequest: 'POST /agent/v1/scope-requests with body { "scopes": [...], "reason": "..." }',
+  })
 }
 
 /** The database-provider *account* (the one shared Neon account) hit its own quota — a

@@ -18,4 +18,8 @@ describe('scopeTone', () => {
     expect(scopeTone('db:ddl')).toBe('purple')
     expect(scopeTone('db:unknown')).toBe('neutral')
   })
+
+  test('non-database scopes get a distinct tone off the db risk scale', () => {
+    expect(scopeTone('branch:create')).toBe('indigo')
+  })
 })

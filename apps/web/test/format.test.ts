@@ -7,6 +7,7 @@ describe('scopeLabel', () => {
     expect(scopeLabel('db:write')).toBe('Write')
     expect(scopeLabel('db:delete')).toBe('Delete')
     expect(scopeLabel('db:ddl')).toBe('Schema')
+    expect(scopeLabel('branch:create')).toBe('Create branch')
   })
 
   test('passes through unknown scopes', () => {

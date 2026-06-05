@@ -8,17 +8,29 @@ export const DB_SCOPES = ['db:read', 'db:write', 'db:delete', 'db:ddl'] as const
 
 export type DbScope = (typeof DB_SCOPES)[number]
 
+/**
+ * Branching scopes — the first non-database capability domain. Unlike `db:*` these aren't
+ * backed by a Postgres role (creating a branch is a provider/metadata operation, not a SQL
+ * statement), so they carry no engine bit and are enforced purely at the route by the
+ * agent's effective scopes. `branch:create` lets an agent fork a new branch from an existing
+ * one (caps and rate limits still apply, same as a user-driven branch creation).
+ */
+export const BRANCH_SCOPES = ['branch:create'] as const
+
+export type BranchScope = (typeof BRANCH_SCOPES)[number]
+
 /** Union of every scope the platform understands today. */
-export type AgentScope = DbScope
+export type AgentScope = DbScope | BranchScope
 
 /** Every scope that can currently be granted, in display order. */
-export const ALL_SCOPES: readonly AgentScope[] = DB_SCOPES
+export const ALL_SCOPES: readonly AgentScope[] = [...DB_SCOPES, ...BRANCH_SCOPES]
 
 export const SCOPE_DESCRIPTIONS: Record<AgentScope, string> = {
   'db:read': 'Run read-only queries (SELECT, SHOW, EXPLAIN).',
   'db:write': 'Insert, update and copy rows (INSERT, UPDATE, MERGE, COPY).',
   'db:delete': 'Remove rows (DELETE, TRUNCATE).',
   'db:ddl': 'Change the schema (CREATE, ALTER, DROP, GRANT).',
+  'branch:create': 'Create a new branch by forking an existing one.',
 }
 
 const SCOPE_SET: ReadonlySet<string> = new Set(ALL_SCOPES)
@@ -40,14 +52,17 @@ export type GrantResourceType = (typeof GRANT_RESOURCE_TYPES)[number]
 /**
  * Which scopes are grantable at each resource level. `db:*` scopes attach to a
  * database, which only exists at the `project`/`branch` level — never the `org`,
- * which has no database of its own. The `org` level is reserved vocabulary for
- * future, non-database org-wide scopes (e.g. `project:create`, `member:invite`),
- * so it grants nothing today.
+ * which has no database of its own. `branch:create` is the first scope grantable at
+ * every level: at `org` it lets an agent fork branches in any project of the org; at
+ * `project` (cascading like `db:*`) any branch of that project; at `branch` just that
+ * one branch (a "you may fork this branch" grant — the fork itself is reachable only if
+ * a project/org grant also covers it). It's also what finally gives the `org` level real
+ * vocabulary, alongside future non-database org-wide scopes (e.g. `member:invite`).
  */
 export const SCOPES_BY_RESOURCE: Record<GrantResourceType, readonly AgentScope[]> = {
-  org: [],
-  project: DB_SCOPES,
-  branch: DB_SCOPES,
+  org: BRANCH_SCOPES,
+  project: [...DB_SCOPES, ...BRANCH_SCOPES],
+  branch: [...DB_SCOPES, ...BRANCH_SCOPES],
 }
 
 export function isScopeValidForResource(resourceType: GrantResourceType, scope: AgentScope): boolean {
@@ -96,7 +111,8 @@ export function missingScopes(held: readonly AgentScope[], required: readonly Ag
 /** Bit per database scope, so a set of scopes collapses to one canonical integer (a
  * "scope set" identity). Only `db:*` scopes carry a bit — they're the ones backed by a
  * Postgres group role, so the mask is exactly what selects a shared scoped connection.
- * Future non-database scopes (e.g. `fn:deploy`) have no engine role and don't widen it. */
+ * Non-database scopes (e.g. `branch:create`, later `fn:deploy`) have no engine role and don't
+ * widen it — an agent holding only `branch:create` resolves to scope key `'0'`. */
 const DB_SCOPE_BIT: Record<DbScope, number> = {
   'db:read': 1,
   'db:write': 2,

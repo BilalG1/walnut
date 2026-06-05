@@ -1,13 +1,19 @@
-import { MAX_CONCURRENT_QUERIES_PER_BRANCH } from '@walnut/core'
+import { effectiveScopes, MAX_CONCURRENT_QUERIES_PER_BRANCH } from '@walnut/core'
 import { Elysia, t } from 'elysia'
 import { extractBearer } from '../auth/bearer.ts'
 import type { AppContext } from '../context.ts'
-import { HttpError, unauthorized } from '../errors.ts'
+import { HttpError, insufficientScope, unauthorized } from '../errors.ts'
 import { enforceRate } from '../rate-limit.ts'
-import { toScopeRequestView } from '../serializers.ts'
+import { toBranchView, toScopeRequestView } from '../serializers.ts'
 import { recordQueryEvent } from '../services/activity.ts'
-import { agentScopesForBranch, findAgentByKey, getAgentHomeProject, resolveAgentProject } from '../services/agents.ts'
-import { listBranchesInternal, listProjectsInOrg, resolveBranch } from '../services/projects.ts'
+import {
+  agentBranchCreateScopes,
+  agentScopesForBranch,
+  findAgentByKey,
+  getAgentHomeProject,
+  resolveAgentProject,
+} from '../services/agents.ts'
+import { createBranchForAgent, listBranchesInternal, listProjectsInOrg, resolveBranch } from '../services/projects.ts'
 import { runAgentQuery } from '../services/query.ts'
 import { createScopeRequest, listAgentScopeRequests } from '../services/scope-requests.ts'
 import { uuid } from '../validation.ts'
@@ -55,6 +61,41 @@ export function agentApiRoutes(ctx: AppContext) {
       },
       // `projectId` is a project UUID (the CLI's `--project <id>`); validate before the DB cast.
       { query: t.Object({ projectId: t.Optional(uuid) }) },
+    )
+    // Fork a new branch from an existing one. Gated by the `branch:create` scope (grantable at the
+    // org, the project, or the source branch) — not a db scope, so it's checked here at the route
+    // rather than at the engine. Shares the dashboard's provisioning core (caps + rate limits).
+    .post(
+      '/branches',
+      async ({ agent, body }) => {
+        // Resolve the target project (explicit or the agent's sole one) and the source branch to
+        // fork (named via `from`, or the project's default branch).
+        const project = await resolveAgentProject(ctx, agent, body.projectId)
+        const source = await resolveBranch(ctx, project.id, body.from)
+        // Authorize over the agent's effective scopes on the org / project / source-branch chain.
+        const granted = effectiveScopes(
+          await agentBranchCreateScopes(ctx, agent.id, agent.organizationId, project.id, source.id),
+        )
+        if (!granted.includes('branch:create')) {
+          throw insufficientScope(
+            'Creating a branch requires the "branch:create" scope, which your agent is missing. ' +
+              'Ask the user to grant it (on the org, the project, or the source branch), then retry.',
+            ['branch:create'],
+            granted,
+          )
+        }
+        return toBranchView(await createBranchForAgent(ctx, project, { name: body.name, from: source.name }, agent.id))
+      },
+      {
+        body: t.Object({
+          /** New branch name. The provisioning core enforces the full charset/length rules. */
+          name: t.String({ minLength: 1, maxLength: 64 }),
+          /** Source branch *name* to fork from (default: the project's default branch). */
+          from: t.Optional(t.String({ maxLength: 64 })),
+          /** Target project (default: the agent's sole project). */
+          projectId: t.Optional(uuid),
+        }),
+      },
     )
     .post(
       '/query',

@@ -60,6 +60,30 @@ export async function branchLs(client: ApiClient, projectId: string | undefined,
   }
 }
 
+/** `branch create <name> [--from <branch>]` → POST /agent/v1/branches. Forks a new branch from
+ * `--from` (default: the project's main branch) in the target project. Needs the `branch:create`
+ * scope; a 403 lists how to request it. Only sends the fields the user set, so the server applies
+ * its own defaults (sole project, default source branch). */
+export async function branchCreate(
+  client: ApiClient,
+  name: string,
+  from: string | undefined,
+  projectId: string | undefined,
+  pretty: boolean,
+): Promise<CliResult> {
+  try {
+    const body = {
+      name,
+      ...(from === undefined ? {} : { from }),
+      ...(projectId === undefined ? {} : { projectId }),
+    }
+    const res = await client.agent.v1.branches.post(body)
+    return respond(res, pretty)
+  } catch (err) {
+    return networkError(err, pretty)
+  }
+}
+
 /** `db query <sql>` → POST /agent/v1/query, against the chosen project + branch. Only sends
  * the target fields the user actually set, so the server applies its own defaults. */
 export async function dbQuery(client: ApiClient, sql: string, target: Target, pretty: boolean): Promise<CliResult> {

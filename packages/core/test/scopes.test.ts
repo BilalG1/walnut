@@ -92,10 +92,11 @@ describe('scope expiry', () => {
 })
 
 describe('scopes by resource', () => {
-  test('db scopes are grantable at project and branch, not org', () => {
+  test('db scopes are grantable at project and branch, not org; branch:create everywhere', () => {
     expect(SCOPES_BY_RESOURCE.project).toEqual([...ALL_SCOPES])
     expect(SCOPES_BY_RESOURCE.branch).toEqual([...ALL_SCOPES])
-    expect(SCOPES_BY_RESOURCE.org).toEqual([])
+    // The org level grants only the non-database branch:create (no db scope — no database there).
+    expect(SCOPES_BY_RESOURCE.org).toEqual(['branch:create'])
   })
 
   test('isScopeValidForResource gates db scopes by level', () => {
@@ -104,9 +105,19 @@ describe('scopes by resource', () => {
     expect(isScopeValidForResource('org', 'db:read')).toBe(false)
   })
 
+  test('branch:create is grantable at every resource level', () => {
+    expect(isScopeValidForResource('org', 'branch:create')).toBe(true)
+    expect(isScopeValidForResource('project', 'branch:create')).toBe(true)
+    expect(isScopeValidForResource('branch', 'branch:create')).toBe(true)
+  })
+
   test('parseScopesForResource accepts and normalises valid project/branch scopes', () => {
     expect(parseScopesForResource('project', ['db:write', 'db:read'])).toEqual(['db:read', 'db:write'])
     expect(parseScopesForResource('branch', ['db:read'])).toEqual(['db:read'])
+  })
+
+  test('parseScopesForResource accepts branch:create at the org level', () => {
+    expect(parseScopesForResource('org', ['branch:create'])).toEqual(['branch:create'])
   })
 
   test('parseScopesForResource rejects db scopes at the org level', () => {
@@ -115,5 +126,22 @@ describe('scopes by resource', () => {
 
   test('parseScopesForResource still rejects unknown scopes', () => {
     expect(() => parseScopesForResource('project', ['db:bogus'])).toThrow(/Unknown scope/)
+  })
+})
+
+describe('non-database scopes (branch:create)', () => {
+  test('branch:create carries no engine bit — it never widens the scope-set key', () => {
+    expect(scopeMask(['branch:create'])).toBe(0)
+    expect(scopeSetKey(['branch:create'])).toBe('0')
+    // Alongside db scopes it's transparent: the key is exactly the db scopes' key.
+    expect(scopeSetKey(['db:read', 'branch:create'])).toBe(scopeSetKey(['db:read']))
+  })
+
+  test('effectiveScopes carries branch:create through expiry like any other scope', () => {
+    const now = new Date('2026-06-02T12:00:00Z')
+    const future = new Date(now.getTime() + 3600_000)
+    const past = new Date(now.getTime() - 1000)
+    expect(effectiveScopes([{ scope: 'branch:create', expiresAt: future }], now)).toEqual(['branch:create'])
+    expect(effectiveScopes([{ scope: 'branch:create', expiresAt: past }], now)).toEqual([])
   })
 })

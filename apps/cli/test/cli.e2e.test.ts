@@ -137,6 +137,53 @@ describe('branch ls', () => {
   }, 20_000)
 })
 
+describe('branch create', () => {
+  test('a granted agent forks a new branch, exit 0', async () => {
+    const { key } = await h.makeAgent({ scopes: ['branch:create'] })
+    const r = await h.run(['branch', 'create', 'feature'], { key })
+    expect(r.code).toBe(0)
+    const out = parse(r.stdout) as { name: string; isDefault: boolean; status: string }
+    expect(out.name).toBe('feature')
+    expect(out.isDefault).toBe(false)
+    expect(out.status).toBe('active')
+    // The new branch shows up in the listing.
+    const list = await h.run(['branch', 'ls'], { key })
+    expect((parse(list.stdout) as { name: string }[]).map((b) => b.name).toSorted()).toEqual(['feature', 'main'])
+  }, 30_000)
+
+  test('--from forks the named source branch', async () => {
+    const { projectId, key } = await h.makeAgent({ scopes: ['branch:create'] })
+    await h.makeBranch(projectId, 'staging')
+    const r = await h.run(['branch', 'create', 'staging-copy', '--from', 'staging'], { key })
+    expect(r.code).toBe(0)
+    expect((parse(r.stdout) as { name: string }).name).toBe('staging-copy')
+  }, 30_000)
+
+  test('without branch:create → exit 4 with the machine-readable body intact', async () => {
+    const { key } = await h.makeAgent({ scopes: ['db:read'] })
+    const r = await h.run(['branch', 'create', 'feature'], { key })
+    expect(r.code).toBe(4)
+    const body = parse(r.stderr)
+    expect(body.error).toBe('insufficient_scope')
+    expect(body.missingScopes).toEqual(['branch:create'])
+  }, 20_000)
+
+  test('branch create with no name → exit 2', async () => {
+    const { key } = await h.makeAgent()
+    const r = await h.run(['branch', 'create'], { key })
+    expect(r.code).toBe(2)
+    expect(parse(r.stderr).message).toContain('needs a name')
+  })
+
+  test('a duplicate branch name → exit 5 (rejected) with the error body intact', async () => {
+    const { key } = await h.makeAgent({ scopes: ['branch:create'] })
+    expect((await h.run(['branch', 'create', 'dev'], { key })).code).toBe(0)
+    const dup = await h.run(['branch', 'create', 'dev'], { key })
+    expect(dup.code).toBe(5)
+    expect(parse(dup.stderr).error).toBe('branch_exists')
+  }, 30_000)
+})
+
 describe('db query', () => {
   test('a granted read returns rows, exit 0', async () => {
     const { key } = await h.makeAgent({ scopes: ['db:read'] })

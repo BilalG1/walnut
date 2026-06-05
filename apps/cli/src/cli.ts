@@ -1,6 +1,6 @@
 import { parseArgs } from './args.ts'
 import { type ApiClient, makeClient } from './client.ts'
-import { branchLs, dbQuery, login, logout, projectLs, scopeLs, scopeRequest, whoami } from './commands.ts'
+import { branchCreate, branchLs, dbQuery, login, logout, projectLs, scopeLs, scopeRequest, whoami } from './commands.ts'
 import { resolveConfig } from './config.ts'
 import { EXIT } from './exit.ts'
 import { authHelp, branchHelp, dbHelp, projectHelp, scopeHelp, topLevelHelp } from './help.ts'
@@ -125,12 +125,21 @@ export async function run(argv: readonly string[], io: CliIO): Promise<CliResult
     case 'branch': {
       if (wantsHelp) return help(branchHelp())
       if (sub === undefined) {
-        return fail(EXIT.USAGE, 'usage', 'branch needs a subcommand. Try: walnut branch ls.', pretty)
+        return fail(EXIT.USAGE, 'usage', 'branch needs a subcommand: "ls" or "create".', pretty)
       }
-      if (sub !== 'ls') {
-        return fail(EXIT.USAGE, 'usage', `Unknown branch subcommand: ${sub}. Only "ls" is supported.`, pretty)
+      if (sub === 'ls') {
+        return withClient(io, parsed.options, pretty, (client) => branchLs(client, flag(parsed.options, 'project'), pretty))
       }
-      return withClient(io, parsed.options, pretty, (client) => branchLs(client, flag(parsed.options, 'project'), pretty))
+      if (sub === 'create') {
+        const name = rest[0]
+        if (name === undefined) {
+          return fail(EXIT.USAGE, 'usage', 'branch create needs a name. Try: walnut branch create <name> [--from <branch>].', pretty)
+        }
+        const from = flag(parsed.options, 'from')
+        const projectId = flag(parsed.options, 'project')
+        return withClient(io, parsed.options, pretty, (client) => branchCreate(client, name, from, projectId, pretty))
+      }
+      return fail(EXIT.USAGE, 'usage', `Unknown branch subcommand: ${sub}. Try "ls" or "create".`, pretty)
     }
 
     case 'scope': {

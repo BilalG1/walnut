@@ -16,6 +16,7 @@ COMMANDS
   whoami                       Print this agent's identity, scopes, org, and home project.
   project ls                   List the projects in this agent's organization (id + name).
   branch ls                    List a project's branches (id + name + default).
+  branch create <name>         Fork a new branch (--from <branch>; needs branch:create).
   db query <sql | ->           Run SQL against a branch database ("-" reads stdin).
   scope ls                     List granted scopes and pending scope requests.
   scope request <scope...>     Ask the user to grant scopes (--reason to explain).
@@ -72,15 +73,27 @@ export function branchHelp(): string {
   return `walnut branch — branch commands
 
 USAGE
-  walnut branch ls     List a project's branches (id + name + default).
+  walnut branch ls                    List a project's branches (id + name + default).
+  walnut branch create <name>         Fork a new branch from an existing one.
 
 FLAGS
   --project <id>     Target project (default: the agent's sole project; required if it
                      can reach several — the error lists the candidates).
+  --from <branch>    Source branch to fork from (branch create only; default: main).
 
 NOTES
   Each branch is its own database. Use a branch name with \`db query --branch <name>\`
-  to run there, or \`scope request --branch <name>\` to request access to just that branch.`
+  to run there, or \`scope request --branch <name>\` to request access to just that branch.
+
+  \`branch create\` needs the \`branch:create\` scope (grantable on the org, the project, or
+  the source branch); a 403 lists how to request it. The fork is a copy-on-write clone of
+  --from, with its own database — request db scopes on it (or on the project, which cascade)
+  to query it.
+
+EXAMPLES
+  walnut branch create feature-x
+  walnut branch create feature-x --from main
+  walnut branch create hotfix --project <id> --from release`
 }
 
 export function dbHelp(): string {

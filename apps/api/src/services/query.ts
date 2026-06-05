@@ -7,12 +7,11 @@ import {
   QUERY_LIMITS,
   type QueryResult,
   runSql,
-  SCOPE_DESCRIPTIONS,
   type ScopeWithExpiry,
 } from '@walnut/core'
 import type { Branch } from '@walnut/db'
 import type { AppContext } from '../context.ts'
-import { HttpError } from '../errors.ts'
+import { HttpError, insufficientScope } from '../errors.ts'
 import { connectionForScopes } from './agents.ts'
 
 export interface AgentQueryResult extends QueryResult {
@@ -69,18 +68,13 @@ export async function runAgentQuery(
   const granted = effectiveScopes(scopeRows, now)
   const missing = missingScopes(granted, classification.requiredScopes)
   if (missing.length > 0) {
-    throw new HttpError(403, {
-      error: 'insufficient_scope',
-      message:
-        `This query requires scope(s) [${classification.requiredScopes.join(', ')}] but your agent is missing [${missing.join(', ')}]. ` +
+    throw insufficientScope(
+      `This query requires scope(s) [${classification.requiredScopes.join(', ')}] but your agent is missing [${missing.join(', ')}]. ` +
         'You can proceed without running it, or ask the user to grant the scope by creating a scope request ' +
         '(POST /agent/v1/scope-requests).',
-      requiredScopes: classification.requiredScopes,
-      missingScopes: missing,
-      grantedScopes: granted,
-      scopeDetails: missing.map((s) => ({ scope: s, description: SCOPE_DESCRIPTIONS[s] })),
-      howToRequest: 'POST /agent/v1/scope-requests with body { "scopes": [...], "reason": "..." }',
-    })
+      classification.requiredScopes,
+      granted,
+    )
   }
 
   // Authorised by the metadata DB. Run over the shared scoped connection for the effective

@@ -386,7 +386,8 @@ export async function findAgentByKey(ctx: AppContext, key: string): Promise<Agen
  * The scope rows that govern an agent on a specific branch — the union of its grants on that
  * branch and on the parent project (the resource chain). A grant anchored to the project applies
  * to every branch; a grant anchored to the branch adds to it. Org grants carry no database scopes
- * (SCOPES_BY_RESOURCE.org is empty) so they never affect a database connection and are omitted.
+ * (SCOPES_BY_RESOURCE.org grants only `branch:create`, not `db:*`) so they never affect a database
+ * connection and are omitted.
  * Returned as raw rows (with expiry) so the caller applies expiry at query time.
  */
 export async function agentScopesForBranch(
@@ -404,6 +405,38 @@ export async function agentScopesForBranch(
         or(
           and(eq(agentGrants.resourceType, 'project'), eq(agentGrants.resourceId, projectId)),
           and(eq(agentGrants.resourceType, 'branch'), eq(agentGrants.resourceId, branchId)),
+        ),
+      ),
+    )
+  const withScopes = await attachScopes(ctx, grants)
+  return withScopes.flatMap((g) => g.scopes)
+}
+
+/**
+ * The scope rows governing whether an agent may create a branch in `projectId` by forking
+ * `sourceBranchId` — the union of its grants on the org, that project, and the source branch.
+ * `branch:create` at any level authorizes the fork: org → any project in the org, project → any
+ * branch of the project, branch → that specific source branch. Unlike {@link agentScopesForBranch}
+ * the org grant *is* included, because `branch:create` (unlike `db:*`) is grantable org-wide.
+ * Raw rows (with expiry) so the caller applies expiry at decision time.
+ */
+export async function agentBranchCreateScopes(
+  ctx: AppContext,
+  agentId: string,
+  orgId: string,
+  projectId: string,
+  sourceBranchId: string,
+): Promise<ScopeWithExpiry[]> {
+  const grants = await ctx.db
+    .select()
+    .from(agentGrants)
+    .where(
+      and(
+        eq(agentGrants.agentId, agentId),
+        or(
+          and(eq(agentGrants.resourceType, 'org'), eq(agentGrants.resourceId, orgId)),
+          and(eq(agentGrants.resourceType, 'project'), eq(agentGrants.resourceId, projectId)),
+          and(eq(agentGrants.resourceType, 'branch'), eq(agentGrants.resourceId, sourceBranchId)),
         ),
       ),
     )

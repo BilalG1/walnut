@@ -5,6 +5,7 @@ const SCOPE_LABELS: Record<string, string> = {
   'db:write': 'Write',
   'db:delete': 'Delete',
   'db:ddl': 'Schema',
+  'branch:create': 'Create branch',
 }
 
 /** Short, human label for a scope chip (e.g. `db:read` -> `Read`). */

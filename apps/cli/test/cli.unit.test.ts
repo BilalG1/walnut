@@ -41,6 +41,13 @@ describe('parseArgs', () => {
     expect(p.options['api-url']).toBe('http://x:1')
   })
 
+  test('--from is a value flag (branch create source)', () => {
+    const p = parseArgs(['branch', 'create', 'feature', '--from', 'main'])
+    expect(p.error).toBeUndefined()
+    expect(p.positionals).toEqual(['branch', 'create', 'feature'])
+    expect(p.options.from).toBe('main')
+  })
+
   test('a lone "-" is a positional, not a flag', () => {
     const p = parseArgs(['db', 'query', '-'])
     expect(p.error).toBeUndefined()
@@ -104,7 +111,9 @@ describe('run — help and version (no network)', () => {
   })
 
   test('branch --help prints to stdout', async () => {
-    expect((await run(['branch', '--help'], io())).stdout).toContain('walnut branch ls')
+    const out = (await run(['branch', '--help'], io())).stdout
+    expect(out).toContain('walnut branch ls')
+    expect(out).toContain('walnut branch create')
   })
 })
 

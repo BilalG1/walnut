@@ -1,5 +1,6 @@
 export {
   DB_SCOPES,
+  BRANCH_SCOPES,
   ALL_SCOPES,
   SCOPE_DESCRIPTIONS,
   GRANT_RESOURCE_TYPES,
@@ -13,7 +14,7 @@ export {
   scopeMask,
   scopeSetKey,
 } from './scopes.ts'
-export type { AgentScope, DbScope, GrantResourceType, ScopeWithExpiry } from './scopes.ts'
+export type { AgentScope, BranchScope, DbScope, GrantResourceType, ScopeWithExpiry } from './scopes.ts'
 
 export { classifySql } from './sql.ts'
 export type { SqlClassification } from './sql.ts'

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach } from 'bun:test'
+import type { AgentScope, GrantResourceType } from '@walnut/core'
 import { createHarness, type Harness } from './harness.ts'
 
 /** The harness for the current test file. A live binding: `useHarness()` reassigns it in
@@ -62,14 +63,15 @@ export function ms(v: string | Date | null | undefined): number {
   return v == null ? Number.NaN : new Date(v).getTime()
 }
 
-/** Helper: have an agent request scopes on a project and immediately approve them. */
-export async function grant(
+/** Have an agent request scopes on any resource and immediately approve them. */
+export async function grantResource(
   apiKey: string,
-  projectId: string,
-  scopes: ('db:read' | 'db:write' | 'db:delete' | 'db:ddl')[],
+  resourceType: GrantResourceType,
+  resourceId: string,
+  scopes: AgentScope[],
 ): Promise<void> {
   const reqRes = await h.api.agent.v1['scope-requests'].post(
-    { scopes, resourceType: 'project', resourceId: projectId },
+    { scopes, resourceType, resourceId },
     { headers: bearer(apiKey) },
   )
   const id = reqRes.data?.id
@@ -77,6 +79,15 @@ export async function grant(
     throw new Error(`scope request failed: ${JSON.stringify(reqRes.error?.value)}`)
   }
   await h.api.api['scope-requests']({ id }).approve.post()
+}
+
+/** Helper: have an agent request scopes on a project and immediately approve them. */
+export async function grant(
+  apiKey: string,
+  projectId: string,
+  scopes: ('db:read' | 'db:write' | 'db:delete' | 'db:ddl')[],
+): Promise<void> {
+  await grantResource(apiKey, 'project', projectId, scopes)
 }
 
 /** The caller's personal org id (every user gets one on first auth). */
