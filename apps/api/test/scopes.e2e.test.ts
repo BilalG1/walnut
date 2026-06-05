@@ -40,6 +40,10 @@ describe('agent query scope enforcement', () => {
     const body = res.error?.value as ErrorBody | undefined
     expect(body?.error).toBe('insufficient_scope')
     expect(body?.missingScopes).toEqual(['db:read'])
+    // The fix guidance must name the CLI verb the agent actually has — not the raw HTTP endpoint —
+    // and embed the precise missing scope so the agent can run it verbatim.
+    expect(body?.howToRequest).toContain('walnut scope request db:read')
+    expect(body?.howToRequest).not.toContain('POST /agent')
   })
 
   test('an empty statement is rejected', async () => {

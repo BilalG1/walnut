@@ -68,7 +68,8 @@ export function agentApiRoutes(ctx: AppContext) {
         if (!granted.includes('branch:create')) {
           throw insufficientScope(
             'Creating a branch requires the "branch:create" scope, which your agent is missing. ' +
-              'Ask the user to grant it (on the org, the project, or the source branch), then retry.',
+              'Ask the user to grant it (on the org, the project, or the source branch) with ' +
+              '`walnut scope request` (see howToRequest for the exact command), then retry.',
             ['branch:create'],
             granted,
           )

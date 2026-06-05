@@ -31,6 +31,7 @@ export interface ErrorBody {
   missingScopes?: string[]
   requiredScopes?: string[]
   grantedScopes?: string[]
+  howToRequest?: string
   limit?: string
   max?: number
 }

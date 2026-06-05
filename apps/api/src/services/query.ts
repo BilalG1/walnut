@@ -70,8 +70,8 @@ export async function runAgentQuery(
   if (missing.length > 0) {
     throw insufficientScope(
       `This query requires scope(s) [${classification.requiredScopes.join(', ')}] but your agent is missing [${missing.join(', ')}]. ` +
-        'You can proceed without running it, or ask the user to grant the scope by creating a scope request ' +
-        '(POST /agent/v1/scope-requests).',
+        'You can proceed without running it, or ask the user to grant the missing scope(s) with ' +
+        '`walnut scope request` (see howToRequest for the exact command).',
       classification.requiredScopes,
       granted,
     )

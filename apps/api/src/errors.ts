@@ -42,9 +42,11 @@ export function limitExceeded(message: string, info: LimitExceededInfo): HttpErr
 /**
  * An agent lacks a scope an action requires. 403 with the machine-readable contract an agent
  * branches on: `requiredScopes`/`missingScopes`/`grantedScopes`, a per-missing-scope
- * `scopeDetails`, and `howToRequest` pointing at the scope-request endpoint. `message` is the
- * human-readable lead-in (each caller phrases its own action, e.g. "This query…" vs "Creating a
- * branch…"); the structured fields are identical so a client never has to parse prose.
+ * `scopeDetails`, and `howToRequest` naming the exact `walnut scope request` CLI command to run
+ * (the agent-facing surface is the CLI, so the fix points at the verb the agent already has — not
+ * the raw HTTP endpoint). `message` is the human-readable lead-in (each caller phrases its own
+ * action, e.g. "This query…" vs "Creating a branch…"); the structured fields are identical so a
+ * client never has to parse prose.
  */
 export function insufficientScope(
   message: string,
@@ -59,7 +61,9 @@ export function insufficientScope(
     missingScopes: missing,
     grantedScopes: [...grantedScopes],
     scopeDetails: missing.map((s) => ({ scope: s, description: SCOPE_DESCRIPTIONS[s] })),
-    howToRequest: 'POST /agent/v1/scope-requests with body { "scopes": [...], "reason": "..." }',
+    howToRequest:
+      `Ask the user to grant ${missing.length === 1 ? 'it' : 'them'} by running: ` +
+      `walnut scope request ${missing.join(' ')} --reason "<why you need it>"`,
   })
 }
 

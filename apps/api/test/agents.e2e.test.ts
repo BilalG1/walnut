@@ -129,6 +129,9 @@ describe('agent branch create', () => {
     const body = res.error?.value as ErrorBody | undefined
     expect(body?.error).toBe('insufficient_scope')
     expect(body?.missingScopes).toEqual(['branch:create'])
+    // Guidance names the CLI verb the agent has, with the precise scope — not the HTTP endpoint.
+    expect(body?.howToRequest).toContain('walnut scope request branch:create')
+    expect(body?.howToRequest).not.toContain('POST /agent')
     // No branch was provisioned by the rejected call.
     const list = await h.api.agent.v1.branches.get({ headers: bearer(agent.apiKey) })
     expect((list.data ?? []).map((b) => b.name).toSorted()).toEqual(['main'])

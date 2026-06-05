@@ -226,7 +226,10 @@ describe('db query', () => {
     const body = parse(r.stderr)
     expect(body.error).toBe('insufficient_scope')
     expect(body.missingScopes).toEqual(['db:read'])
-    expect(typeof body.howToRequest).toBe('string')
+    // The agent drives the CLI, so the denial must tell it the CLI command to run — the exact
+    // `walnut scope request <missing>` verb — rather than pointing at the raw HTTP endpoint.
+    expect(body.howToRequest).toContain('walnut scope request db:read')
+    expect(body.howToRequest).not.toContain('POST /agent')
   })
 
   test('SQL from stdin via "-"', async () => {

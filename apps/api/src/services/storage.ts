@@ -219,7 +219,7 @@ export function assertStorageScope(scopeRows: readonly ScopeWithExpiry[], requir
   if (!granted.includes(required)) {
     throw insufficientScope(
       `This operation requires the "${required}" scope but your agent is missing it. ` +
-        'You can ask the user to grant it by creating a scope request (POST /agent/v1/scope-requests).',
+        'Ask the user to grant it with `walnut scope request` (see howToRequest for the exact command).',
       [required],
       granted,
     )
