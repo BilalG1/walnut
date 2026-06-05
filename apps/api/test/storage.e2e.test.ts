@@ -267,3 +267,112 @@ describe('storage — dedup, delete, commit, limits', () => {
     expect(st.data?.size).toBe(bytes.byteLength)
   }, 30_000)
 })
+
+// A two-phase overwrite must be atomic for READS: the live version stays fully readable until the
+// new bytes are committed, and an abandoned overwrite (presign minted, never PUT/committed) must
+// leave the original intact. The dangerous case is overwriting a path the branch already OWNS with
+// genuinely new (non-dedup) bytes — staging that upload must not touch the committed view.
+describe('storage — overwrite atomicity (no data loss mid-overwrite)', () => {
+  /** Begin a two-phase overwrite with new bytes but DON'T finish it: returns the presign response. */
+  async function beginOverwrite(apiKey: string, path: string, bytes: Uint8Array<ArrayBuffer>) {
+    const res = await h.api.agent.v1.storage.upload.post(
+      { path, sha256: sha256(bytes), size: bytes.byteLength },
+      { headers: bearer(apiKey) },
+    )
+    return res
+  }
+
+  test('an in-flight overwrite keeps the old version fully readable until commit', async () => {
+    const { agent } = await setup(['storage:read', 'storage:write'])
+    const v1 = enc('version one')
+    await put(agent.apiKey, 'doc', v1, { contentType: 'text/plain' })
+
+    // Start an overwrite with DIFFERENT (new, not-yet-stored) bytes — presign only, no PUT/commit.
+    const v2 = enc('version two — different and longer content')
+    const begun = await beginOverwrite(agent.apiKey, 'doc', v2)
+    expect(begun.data?.status).toBe('upload') // a real presign for new bytes, not a dedup-commit
+
+    // stat: still the OLD version, intact.
+    const st = await h.api.agent.v1.storage.stat.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    expect(st.status).toBe(200)
+    expect(st.data?.size).toBe(v1.byteLength)
+    expect(st.data?.contentType).toBe('text/plain')
+
+    // download: still resolves the OLD bytes.
+    const dl = await h.api.agent.v1.storage.download.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    expect(dl.status).toBe(200)
+    const fetched = await fetch(dl.data?.url ?? '')
+    expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(v1)
+
+    // ls: the object is still listed.
+    const ls = await h.api.agent.v1.storage.ls.get({ query: {}, headers: bearer(agent.apiKey) })
+    expect(ls.data?.objects.map((o) => o.path)).toContain('doc')
+  }, 30_000)
+
+  test('completing the overwrite flips atomically to the new bytes (and content type)', async () => {
+    const { agent } = await setup(['storage:read', 'storage:write'])
+    const v1 = enc('first')
+    const v2 = enc('second, replacing the first entirely')
+    await put(agent.apiKey, 'doc', v1, { contentType: 'text/plain' })
+    await put(agent.apiKey, 'doc', v2, { contentType: 'application/json' }) // full overwrite (presign → PUT → commit)
+
+    const st = await h.api.agent.v1.storage.stat.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    expect(st.data?.size).toBe(v2.byteLength)
+    // The committed content type is replaced by the overwrite's (sourced from the staged columns).
+    expect(st.data?.contentType).toBe('application/json')
+    const dl = await h.api.agent.v1.storage.download.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    const fetched = await fetch(dl.data?.url ?? '')
+    expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(v2)
+  }, 30_000)
+
+  test('overwriting via a dedup hit flips atomically, never losing the row', async () => {
+    const { agent } = await setup(['storage:read', 'storage:write'])
+    const v1 = enc('the original doc bytes')
+    const shared = enc('bytes that already exist elsewhere in the project')
+    await put(agent.apiKey, 'doc', v1)
+    await put(agent.apiKey, 'sidecar', shared) // `shared` is now stored in the project
+
+    // Overwrite `doc` with the already-stored bytes → a dedup hit: commits in place (no PUT), which
+    // takes the `upsertCommitted` path rather than stage→promote. It must flip atomically.
+    const res = await h.api.agent.v1.storage.upload.post(
+      { path: 'doc', sha256: sha256(shared), size: shared.byteLength },
+      { headers: bearer(agent.apiKey) },
+    )
+    expect(res.data?.status).toBe('committed') // the dedup-commit path, not a presign
+
+    const st = await h.api.agent.v1.storage.stat.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    expect(st.status).toBe(200)
+    expect(st.data?.size).toBe(shared.byteLength)
+    const dl = await h.api.agent.v1.storage.download.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    const fetched = await fetch(dl.data?.url ?? '')
+    expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(shared)
+  }, 30_000)
+
+  test('an abandoned overwrite leaves the original intact (no durability loss)', async () => {
+    const { agent } = await setup(['storage:read', 'storage:write'])
+    const v1 = enc('keep me safe')
+    await put(agent.apiKey, 'doc', v1)
+
+    // Abandon an overwrite: presign new bytes, then never PUT/commit (e.g. client crash).
+    await beginOverwrite(agent.apiKey, 'doc', enc('half-written replacement that never lands'))
+
+    // The original must still be downloadable byte-for-byte.
+    const dl = await h.api.agent.v1.storage.download.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    expect(dl.status).toBe(200)
+    const fetched = await fetch(dl.data?.url ?? '')
+    expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(v1)
+  }, 30_000)
+
+  test('re-uploading a deleted path resurrects it (delete then write round-trips)', async () => {
+    const { agent } = await setup(['storage:read', 'storage:write', 'storage:delete'])
+    await put(agent.apiKey, 'doc', enc('original'))
+    await h.api.agent.v1.storage.delete.post({ path: 'doc' }, { headers: bearer(agent.apiKey) })
+    expect((await h.api.agent.v1.storage.stat.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })).status).toBe(404)
+
+    const revived = enc('brought back to life')
+    await put(agent.apiKey, 'doc', revived)
+    const st = await h.api.agent.v1.storage.stat.get({ query: { path: 'doc' }, headers: bearer(agent.apiKey) })
+    expect(st.status).toBe(200)
+    expect(st.data?.size).toBe(revived.byteLength)
+  }, 30_000)
+})

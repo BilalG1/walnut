@@ -257,18 +257,75 @@ function assertWithinBlobSize(size: number): void {
   }
 }
 
-/** Upsert this branch's divergence row for `path` (one row per branch per path — a write or a
- * tombstone). Re-uploading or deleting a path replaces the branch's prior row. */
-async function upsertManifestRow(
+/** The committed view of a divergence row — a live object or a tombstone (the columns reads
+ * resolve over). Writing one always clears any in-flight staging (see {@link upsertCommitted}). */
+interface CommittedView {
+  physicalKey: string | null
+  deleted: boolean
+  size: number
+  contentType: string | null
+  etag: string | null
+}
+
+/** Clear the staged-upload columns — the committed view is now authoritative. */
+const CLEAR_STAGED = { stagedPhysicalKey: null, stagedSize: 0, stagedContentType: null } as const
+
+/**
+ * Stage an in-flight upload for `(branch, path)` WITHOUT disturbing any committed view. A
+ * brand-new path inserts an invisible `pending` placeholder; an existing committed object or
+ * tombstone keeps all of its committed columns and only records the staged bytes — so the live
+ * version stays resolvable mid-overwrite and an abandoned upload never destroys it.
+ * {@link commitUpload} later promotes the staged bytes into the committed view.
+ */
+async function stageUpload(
   ctx: AppContext,
   branchId: string,
   path: string,
-  row: { physicalKey: string | null; deleted: boolean; size: number; contentType: string | null; etag: string | null; state: 'pending' | 'committed' },
+  staged: { physicalKey: string; size: number; contentType: string | null },
 ): Promise<void> {
   await ctx.db
     .insert(storageObjects)
-    .values({ ownerBranchId: branchId, path, ...row })
-    .onConflictDoUpdate({ target: [storageObjects.ownerBranchId, storageObjects.path], set: row })
+    .values({
+      ownerBranchId: branchId,
+      path,
+      // A never-yet-committed new path: no committed view, so reads skip it until its first commit.
+      state: 'pending',
+      stagedPhysicalKey: staged.physicalKey,
+      stagedSize: staged.size,
+      stagedContentType: staged.contentType,
+    })
+    .onConflictDoUpdate({
+      target: [storageObjects.ownerBranchId, storageObjects.path],
+      // ONLY the staged columns — the committed view (physicalKey/deleted/size/contentType/etag/
+      // state) is deliberately left untouched so an in-flight overwrite can't lose the live row.
+      set: { stagedPhysicalKey: staged.physicalKey, stagedSize: staged.size, stagedContentType: staged.contentType },
+    })
+}
+
+/** Write `(branch, path)`'s committed view directly (a dedup-hit upload that needs no PUT, or a
+ * tombstone), clearing any in-flight staging. One statement, so reads never see an intermediate. */
+async function upsertCommitted(ctx: AppContext, branchId: string, path: string, view: CommittedView): Promise<void> {
+  const committed = { ...view, state: 'committed' as const, ...CLEAR_STAGED }
+  await ctx.db
+    .insert(storageObjects)
+    .values({ ownerBranchId: branchId, path, ...committed })
+    .onConflictDoUpdate({ target: [storageObjects.ownerBranchId, storageObjects.path], set: committed })
+}
+
+/** Promote a row's staged bytes into its committed view in one statement (the atomic overwrite
+ * flip) and clear staging. The row is known to exist (createUpload staged it). */
+async function promoteStaged(
+  ctx: AppContext,
+  branchId: string,
+  path: string,
+  view: CommittedView,
+): Promise<typeof storageObjects.$inferSelect | undefined> {
+  const [updated] = await ctx.db
+    .update(storageObjects)
+    .set({ ...view, state: 'committed', ...CLEAR_STAGED })
+    .where(and(eq(storageObjects.ownerBranchId, branchId), eq(storageObjects.path, path)))
+    .returning()
+  return updated
 }
 
 /**
@@ -377,27 +434,22 @@ export async function createUpload(
       // could declare a tiny size while pointing at an existing large key to slip the quota).
       assertWithinBlobSize(head.size)
       await enforceBranchStorageCaps(ctx, branch.id, input.path, head.size)
-      await upsertManifestRow(ctx, branch.id, input.path, {
+      // The bytes already exist — commit straight into the committed view (atomic; clears any
+      // in-flight staging) so an overwrite-by-dedup never exposes an intermediate state.
+      await upsertCommitted(ctx, branch.id, input.path, {
         physicalKey: key,
         deleted: false,
         size: head.size,
         contentType,
         etag: head.etag,
-        state: 'committed',
       })
       return { status: 'committed', path: input.path, size: head.size }
     }
   }
 
-  // New (or not-yet-uploaded) bytes: stage a pending row and presign the PUT.
-  await upsertManifestRow(ctx, branch.id, input.path, {
-    physicalKey: key,
-    deleted: false,
-    size: input.size,
-    contentType,
-    etag: null,
-    state: 'pending',
-  })
+  // New (or not-yet-uploaded) bytes: STAGE the upload — never touching any committed view — and
+  // presign the PUT. commitUpload promotes the staged bytes once they land.
+  await stageUpload(ctx, branch.id, input.path, { physicalKey: key, size: input.size, contentType })
   const url = await ctx.blobProvider.presignPut(key, {
     expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds,
     contentType: input.contentType,
@@ -420,13 +472,15 @@ export async function commitUpload(
     .from(storageObjects)
     .where(and(eq(storageObjects.ownerBranchId, branch.id), eq(storageObjects.path, input.path)))
     .limit(1)
-  if (row === undefined || row.state !== 'pending' || row.physicalKey === null) {
+  // A commit needs a staged upload (recorded by createUpload). No staged bytes → nothing to flip.
+  const stagedKey = row?.stagedPhysicalKey ?? null
+  if (row === undefined || stagedKey === null) {
     throw new HttpError(409, {
       error: 'no_pending_upload',
       message: `No pending upload for "${input.path}" on this branch. Start one with POST /agent/v1/storage/upload.`,
     })
   }
-  const head = await ctx.blobProvider.head(row.physicalKey)
+  const head = await ctx.blobProvider.head(stagedKey)
   if (!head.exists) {
     throw new HttpError(409, {
       error: 'upload_missing',
@@ -438,16 +492,20 @@ export async function commitUpload(
   // is the authoritative check; the upload-time check on the declared size is only an early reject.
   assertWithinBlobSize(head.size)
   await enforceBranchStorageCaps(ctx, branch.id, input.path, head.size)
-  await ctx.db.update(physicalObjects).set({ size: head.size }).where(eq(physicalObjects.physicalKey, row.physicalKey))
-  const [updated] = await ctx.db
-    .update(storageObjects)
-    .set({ state: 'committed', size: head.size, etag: head.etag })
-    .where(and(eq(storageObjects.ownerBranchId, branch.id), eq(storageObjects.path, input.path)))
-    .returning()
+  await ctx.db.update(physicalObjects).set({ size: head.size }).where(eq(physicalObjects.physicalKey, stagedKey))
+  // Atomic flip: promote the staged bytes into the committed view (only now does the overwrite
+  // become visible to reads), clearing the staging columns.
+  const updated = await promoteStaged(ctx, branch.id, input.path, {
+    physicalKey: stagedKey,
+    deleted: false,
+    size: head.size,
+    contentType: row.stagedContentType,
+    etag: head.etag,
+  })
   return {
     path: input.path,
     size: updated?.size ?? head.size,
-    contentType: updated?.contentType ?? null,
+    contentType: updated?.contentType ?? row.stagedContentType,
     etag: updated?.etag ?? head.etag,
   }
 }
@@ -463,13 +521,13 @@ export async function deleteObject(
   if (resolved === null) {
     throw notFound('Object')
   }
-  await upsertManifestRow(ctx, branch.id, input.path, {
+  // Tombstone the committed view (and cancel any in-flight overwrite staging on this row).
+  await upsertCommitted(ctx, branch.id, input.path, {
     physicalKey: null,
     deleted: true,
     size: 0,
     contentType: null,
     etag: null,
-    state: 'committed',
   })
   return { path: input.path, deleted: true }
 }

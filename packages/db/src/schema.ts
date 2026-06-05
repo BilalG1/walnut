@@ -158,8 +158,13 @@ export const branches = pgTable(
   (t) => [unique('branches_project_name_unique').on(t.projectId, t.name)],
 )
 
-/** Whether a manifest row is an in-flight upload or a visible, durable object. Reads only ever
- * see `committed` rows; a `pending` row is a presigned-but-not-yet-confirmed upload. */
+/**
+ * Whether a row has a durable committed view yet. `committed` means the committed columns
+ * (`physicalKey`/`deleted`/`size`/…) hold a real object or tombstone that reads resolve;
+ * `pending` is a brand-new path whose FIRST upload hasn't been confirmed (no committed view —
+ * invisible to reads). An *overwrite* of an already-committed path stays `committed` and stages
+ * the next bytes in the `staged_*` columns, so the live version is never disturbed until commit.
+ */
 export type StorageObjectState = 'pending' | 'committed'
 
 /**
@@ -204,8 +209,21 @@ export const storageObjects = pgTable(
     size: bigint('size', { mode: 'number' }).notNull().default(0),
     contentType: text('content_type'),
     etag: text('etag'),
-    /** Reads see only `committed`; `pending` is a presigned-but-unconfirmed upload. */
+    /** Reads see only `committed`; `pending` is a never-yet-committed new path. See
+     * {@link StorageObjectState}. */
     state: text('state').$type<StorageObjectState>().notNull().default('pending'),
+    // ── In-flight upload staging (kept separate from the committed view above) ──────────────────
+    // An overwrite stages its next bytes here at `/upload` and the committed columns are untouched
+    // until `/commit` promotes them — so the live version stays resolvable mid-overwrite and an
+    // abandoned upload never destroys it. All null when no upload is in flight.
+    /** The content-addressed byte a pending upload will commit to. `restrict` like
+     * {@link physicalKey} so a staged byte can't be GC'd out from under an in-flight commit. */
+    stagedPhysicalKey: text('staged_physical_key').references(() => physicalObjects.physicalKey, { onDelete: 'restrict' }),
+    /** Client-declared size of the staged bytes (the authoritative size is re-captured by HEAD at
+     * commit). 0 when nothing is staged. */
+    stagedSize: bigint('staged_size', { mode: 'number' }).notNull().default(0),
+    /** Content type to record on the staged bytes when they commit. */
+    stagedContentType: text('staged_content_type'),
     /** Multipart upload id while a large blob is in flight (seam for multipart). */
     uploadId: text('upload_id'),
     createdAt,
@@ -219,8 +237,10 @@ export const storageObjects = pgTable(
     // byte semantics the resolution queries use (the default-collation PK can't serve a C-ordered
     // range). Leading `owner_branch_id` lets the planner scan each branch in the ancestry set.
     index('storage_objects_owner_path_c_idx').on(t.ownerBranchId, sql`${t.path} COLLATE "C"`),
-    // GC / overwrite bookkeeping: find rows referencing a physical key.
+    // GC / overwrite bookkeeping: find rows referencing a physical key (committed or staged — a
+    // future GC sweep must scan both, since a staged reference also pins a byte against collection).
     index('storage_objects_physical_key_idx').on(t.physicalKey),
+    index('storage_objects_staged_physical_key_idx').on(t.stagedPhysicalKey),
   ],
 )
 
