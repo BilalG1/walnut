@@ -270,6 +270,59 @@ describe('branches', () => {
   }, 30_000)
 })
 
+// The denormalized ancestry array is what the storage manifest resolves reads over, so branch
+// creation must maintain it correctly — and creating a branch must stay O(1) (one row insert).
+describe('branch ancestry', () => {
+  async function defaultBranch(projectId: string) {
+    const [row] = await h.ctx.db
+      .select()
+      .from(branches)
+      .where(and(eq(branches.projectId, projectId), eq(branches.isDefault, true)))
+    return row
+  }
+  async function branchRow(id: string) {
+    const [row] = await h.ctx.db.select().from(branches).where(eq(branches.id, id))
+    return row
+  }
+
+  test('main is self-rooted: no parent, ancestry = [self]', async () => {
+    const project = await newProject('anc-main')
+    const main = await defaultBranch(project.id)
+    expect(main?.parentId).toBeNull()
+    expect(main?.ancestry).toEqual([main?.id ?? ''])
+  })
+
+  test('a branch forked from main has ancestry [self, main] and parentId = main', async () => {
+    const project = await newProject('anc-fork')
+    const main = await defaultBranch(project.id)
+    const child = await h.api.api.projects({ id: project.id }).branches.post({ name: 'feature' })
+    const row = await branchRow(child.data?.id ?? '')
+    expect(row?.parentId).toBe(main?.id ?? '')
+    expect(row?.ancestry).toEqual([child.data?.id ?? '', main?.id ?? ''])
+  })
+
+  test('a deep fork chains ancestry nearest-first ([self, parent, …, root])', async () => {
+    const project = await newProject('anc-deep')
+    const main = await defaultBranch(project.id)
+    const staging = await h.api.api.projects({ id: project.id }).branches.post({ name: 'staging' })
+    const copy = await h.api.api
+      .projects({ id: project.id })
+      .branches.post({ name: 'staging-copy', from: 'staging' })
+    const row = await branchRow(copy.data?.id ?? '')
+    expect(row?.parentId).toBe(staging.data?.id ?? '')
+    expect(row?.ancestry).toEqual([copy.data?.id ?? '', staging.data?.id ?? '', main?.id ?? ''])
+  }, 30_000)
+
+  test('a branch with children cannot be deleted (409 branch_has_children)', async () => {
+    const project = await newProject('anc-children')
+    await h.api.api.projects({ id: project.id }).branches.post({ name: 'parent' })
+    await h.api.api.projects({ id: project.id }).branches.post({ name: 'kid', from: 'parent' })
+    const del = await h.api.api.projects({ id: project.id }).branches({ branch: 'parent' }).delete()
+    expect(del.status).toBe(409)
+    expect((del.error?.value as ErrorBody | undefined)?.error).toBe('branch_has_children')
+  }, 30_000)
+})
+
 describe('dashboard data viewer (POST /api/projects/:id/sql)', () => {
   test('runs a parameterized read-only query', async () => {
     const project = await newProject()

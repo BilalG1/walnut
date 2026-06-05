@@ -12,11 +12,14 @@ export {
   branchDbRoles,
   scopeRequests,
   queryEvents,
+  storageObjects,
+  physicalObjects,
 } from './schema.ts'
 export type {
   ProjectStatus,
   ScopeRequestStatus,
   QueryEventStatus,
+  StorageObjectState,
   InvitationStatus,
   GrantResourceType,
   OrgRole,
@@ -44,6 +47,10 @@ export type {
   NewScopeRequest,
   QueryEvent,
   NewQueryEvent,
+  StorageObject,
+  NewStorageObject,
+  PhysicalObject,
+  NewPhysicalObject,
 } from './schema.ts'
 export { openDb } from './client.ts'
 export type { Database, DbHandle, Schema } from './client.ts'

@@ -47,6 +47,8 @@ export {
 } from './ports.ts'
 export type { PortService, LocalDbUrlOptions } from './ports.ts'
 
+export { branchAncestry } from './storage/ancestry.ts'
+
 export { createBlobProvider, isSha256, physicalKey, projectKeyPrefix, stagingKey } from './blob/index.ts'
 export type {
   BlobHead,

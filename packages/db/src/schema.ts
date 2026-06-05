@@ -1,5 +1,19 @@
 import type { AgentScope, GrantResourceType, ProviderKind } from '@walnut/core'
-import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import {
+  type AnyPgColumn,
+  bigint,
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core'
 
 export type { GrantResourceType } from '@walnut/core'
 
@@ -123,6 +137,15 @@ export const branches = pgTable(
     name: text('name').notNull(),
     /** The branch a new agent/connection targets by default (the `main` branch). */
     isDefault: boolean('is_default').notNull().default(false),
+    /** The branch this one was forked from (null for a project's `main`). Authoritative lineage;
+     * the {@link ancestry} array is a derived cache of this chain. `set null` so a whole-project
+     * cascade delete isn't blocked by the self-reference; deleting a branch that still has
+     * children is blocked in the service layer (mirroring the default-branch rule). */
+    parentId: uuid('parent_id').references((): AnyPgColumn => branches.id, { onDelete: 'set null' }),
+    /** Denormalized nearest-first ancestry (`{self, parent, …, root}`) the storage manifest
+     * resolves reads over — a rebuilt cache of the {@link parentId} chain, never hand-edited.
+     * Empty only transiently before it's set on insert. */
+    ancestry: uuid('ancestry').array().notNull().default(sql`ARRAY[]::uuid[]`),
     /** Provider-side id used to destroy this branch's database (Neon branch id / local db name). */
     providerBranchId: text('provider_branch_id'),
     /** Owner connection string for this branch's database. Null until provisioning completes. */
@@ -133,6 +156,72 @@ export const branches = pgTable(
     createdAt,
   },
   (t) => [unique('branches_project_name_unique').on(t.projectId, t.name)],
+)
+
+/** Whether a manifest row is an in-flight upload or a visible, durable object. Reads only ever
+ * see `committed` rows; a `pending` row is a presigned-but-not-yet-confirmed upload. */
+export type StorageObjectState = 'pending' | 'committed'
+
+/**
+ * The physical bytes layer of storage: one row per *immutable, content-addressed* blob, keyed by
+ * its `<projectId>/blobs/<sha256>` physical key. This table — never an S3 LIST — drives garbage
+ * collection: a physical key is collectable once no `storage_objects` row references it and it's
+ * older than the upload grace window. The FK from `storage_objects.physical_key` makes Postgres
+ * referential integrity the guard on the byte (a reference can't be added to a key GC is deleting).
+ */
+export const physicalObjects = pgTable('physical_objects', {
+  /** `<projectId>/blobs/<sha256>` — the content-addressed key in the object store. */
+  physicalKey: text('physical_key').primaryKey(),
+  /** Authoritative size in bytes, captured from a HEAD at commit (never client-declared). */
+  size: bigint('size', { mode: 'number' }).notNull(),
+  createdAt,
+})
+
+/**
+ * The "layered manifest" — each branch owns only its *divergences* (overwrites + tombstones),
+ * never the unchanged base files, so the manifest grows with edits, not objects × branches.
+ * A branch's effective view of a path is the nearest-ancestor-wins resolution over its
+ * {@link branches.ancestry}: a write inserts a row owned by the writing branch (shadowing
+ * ancestors); a delete inserts a tombstone row (`deleted = true`, null `physicalKey`) — bytes
+ * are shared, so they're never removed inline. Lives in the platform DB (not the per-branch
+ * databases) because the overlay query must span all of a project's branches.
+ */
+export const storageObjects = pgTable(
+  'storage_objects',
+  {
+    /** The branch that wrote this divergence row. */
+    ownerBranchId: uuid('owner_branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    /** Logical key — opaque text, compared with C collation in queries for byte ordering. */
+    path: text('path').notNull(),
+    /** The content-addressed byte this row points at; null for a tombstone. `restrict` so a
+     * referenced byte can't be GC'd out from under a live row. */
+    physicalKey: text('physical_key').references(() => physicalObjects.physicalKey, { onDelete: 'restrict' }),
+    /** Tombstone flag: a delete marker that shadows any ancestor copy of this path. */
+    deleted: boolean('deleted').notNull().default(false),
+    /** Size in bytes (0 for a tombstone) — denormalized from the physical object for listings. */
+    size: bigint('size', { mode: 'number' }).notNull().default(0),
+    contentType: text('content_type'),
+    etag: text('etag'),
+    /** Reads see only `committed`; `pending` is a presigned-but-unconfirmed upload. */
+    state: text('state').$type<StorageObjectState>().notNull().default('pending'),
+    /** Multipart upload id while a large blob is in flight (seam for multipart). */
+    uploadId: text('upload_id'),
+    createdAt,
+  },
+  (t) => [
+    // One row per (branch, path): a branch's view of a path is a single divergence (write or
+    // tombstone). Re-uploading upserts this row.
+    primaryKey({ columns: [t.ownerBranchId, t.path] }),
+    // Serves the cross-branch prefix-list: a per-branch range scan over `path` in **C collation**
+    // (byte ordering), so `path >= prefix AND path < prefix_hi` is index-driven and matches the
+    // byte semantics the resolution queries use (the default-collation PK can't serve a C-ordered
+    // range). Leading `owner_branch_id` lets the planner scan each branch in the ancestry set.
+    index('storage_objects_owner_path_c_idx').on(t.ownerBranchId, sql`${t.path} COLLATE "C"`),
+    // GC / overwrite bookkeeping: find rows referencing a physical key.
+    index('storage_objects_physical_key_idx').on(t.physicalKey),
+  ],
 )
 
 export const agents = pgTable('agents', {
@@ -304,3 +393,7 @@ export type ScopeRequest = typeof scopeRequests.$inferSelect
 export type NewScopeRequest = typeof scopeRequests.$inferInsert
 export type QueryEvent = typeof queryEvents.$inferSelect
 export type NewQueryEvent = typeof queryEvents.$inferInsert
+export type StorageObject = typeof storageObjects.$inferSelect
+export type NewStorageObject = typeof storageObjects.$inferInsert
+export type PhysicalObject = typeof physicalObjects.$inferSelect
+export type NewPhysicalObject = typeof physicalObjects.$inferInsert

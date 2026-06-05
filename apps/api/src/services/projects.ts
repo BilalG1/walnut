@@ -1,4 +1,6 @@
 import {
+  branchAncestry,
+  newId,
   ProviderError,
   type ProvisionedDatabase,
   type ProvisionedProject,
@@ -226,9 +228,20 @@ export async function createProject(
 
   // Every project starts with a `main` branch — the branch *is* the database, so it carries
   // the connection/roles. It starts provisioning and flips to active alongside the project.
+  // `main` is a root branch: no parent, ancestry is just itself. We mint the id up front so the
+  // ancestry array can include it without a follow-up update.
+  const mainBranchId = newId()
   const [mainBranch] = await ctx.db
     .insert(branches)
-    .values({ projectId: created.id, name: 'main', isDefault: true, status: 'provisioning' })
+    .values({
+      id: mainBranchId,
+      projectId: created.id,
+      name: 'main',
+      isDefault: true,
+      status: 'provisioning',
+      parentId: null,
+      ancestry: branchAncestry(mainBranchId),
+    })
     .returning()
   if (mainBranch === undefined) {
     throw new HttpError(500, { error: 'internal_error', message: 'Failed to create main branch.' })
@@ -471,11 +484,22 @@ async function provisionBranch(
     throw conflict
   }
 
+  // Fork: the new branch's ancestry prepends its own (freshly minted) id to the source's
+  // ancestry — O(1), the instant-branch guarantee. No storage_objects rows are touched.
+  const newBranchId = newId()
   let created: Branch | undefined
   try {
     ;[created] = await ctx.db
       .insert(branches)
-      .values({ projectId, name: input.name, isDefault: false, status: 'provisioning' })
+      .values({
+        id: newBranchId,
+        projectId,
+        name: input.name,
+        isDefault: false,
+        status: 'provisioning',
+        parentId: source.id,
+        ancestry: branchAncestry(newBranchId, source.ancestry),
+      })
       .returning()
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -562,6 +586,19 @@ export async function deleteBranch(ctx: AppContext, projectId: string, name: str
     throw new HttpError(400, {
       error: 'cannot_delete_default',
       message: 'The default branch cannot be deleted. Delete the project instead.',
+    })
+  }
+  // Block deleting a branch that still has children: their storage manifest resolves over an
+  // ancestry that includes this branch, so removing it would strand them. Delete the children
+  // first (restrict-or-reparent — we restrict). Mirrors the default-branch rule.
+  const [{ n: childCount } = { n: 0 }] = await ctx.db
+    .select({ n: count() })
+    .from(branches)
+    .where(eq(branches.parentId, branch.id))
+  if (childCount > 0) {
+    throw new HttpError(409, {
+      error: 'branch_has_children',
+      message: `Branch "${branch.name}" has ${childCount} child branch(es); delete them first.`,
     })
   }
   if (branch.providerBranchId !== null) {
