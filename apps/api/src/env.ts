@@ -83,7 +83,8 @@ function required(name: string): string {
 function loadAuthConfig(isProduction: boolean): AuthEnv {
   const apiBaseUrl = process.env.HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com'
   const projectId = process.env.HEXCLAVE_PROJECT_ID?.trim()
-  const explicit = process.env.AUTH_PROVIDER
+  // Treat blank/whitespace AUTH_PROVIDER as unset, and tolerate stray padding.
+  const explicit = process.env.AUTH_PROVIDER?.trim() || undefined
   // In production, refuse to SILENTLY fall back to passwordless local auth — an unset or
   // typo'd HEXCLAVE_PROJECT_ID must fail loudly, not boot an open, anyone-can-sign-in
   // dashboard. Self-hosters who genuinely want local auth in prod opt in explicitly with
