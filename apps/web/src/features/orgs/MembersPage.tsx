@@ -7,7 +7,6 @@ import { PageContainer } from '../../components/layout/PageContainer.tsx'
 import {
   useCreateInvitation,
   useMe,
-  useOrganizations,
   useOrgInvitations,
   useOrgMembers,
   useRemoveMember,
@@ -34,7 +33,6 @@ export function MembersPage() {
 
 function MembersView({ orgId }: { orgId: string }) {
   const me = useMe()
-  const orgs = useOrganizations()
   const members = useOrgMembers(orgId)
   const removeMember = useRemoveMember(orgId)
   const createInvite = useCreateInvitation(orgId)
@@ -43,10 +41,6 @@ function MembersView({ orgId }: { orgId: string }) {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteLink, setInviteLink] = useState<string | null>(null)
 
-  const isPersonal = orgs.data?.find((o) => o.id === orgId)?.isPersonal ?? false
-  // Only show invite affordances once the org list is loaded, so a personal org never flashes the
-  // "Invite link" button before we know it can't have members.
-  const canInvite = orgs.data !== undefined && !isPersonal
   const rows = members.data ?? []
 
   // Generation is driven by user action (button click / "New link"), never a render-time effect.
@@ -79,20 +73,16 @@ function MembersView({ orgId }: { orgId: string }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Members</h1>
           <p className="mt-1 text-sm text-subtle">
-            {isPersonal
-              ? 'Your personal organization is just you — invite teammates by creating a shared organization.'
-              : 'Everyone in this organization. Share an invite link to add a teammate.'}
+            Everyone in this organization. Share an invite link to add a teammate.
           </p>
         </div>
-        {canInvite ? (
-          <Button className="ml-auto" onClick={openInvite}>
-            <Plus size={15} />
-            Invite link
-          </Button>
-        ) : null}
+        <Button className="ml-auto" onClick={openInvite}>
+          <Plus size={15} />
+          Invite link
+        </Button>
       </div>
 
-      {canInvite ? <PendingInvites orgId={orgId} /> : null}
+      <PendingInvites orgId={orgId} />
 
       <div className="mt-6">
         {members.isPending ? (

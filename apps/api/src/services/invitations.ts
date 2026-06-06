@@ -75,9 +75,11 @@ export interface CreatedInvitation {
 }
 
 /**
- * Mint a link-based invite into a shared org. The caller must be a member (any member can invite —
- * no role gate yet). Personal orgs are single-user containers, so they're refused. Returns the
- * plaintext token exactly once; only its hash + display prefix are stored.
+ * Mint a link-based invite into an org. The caller must be a member (any member can invite — no
+ * role gate yet); `assertOrgMember` also rejects a non-existent org. Every org can have members —
+ * the auto-provisioned "personal" org is just an org you happen to start out alone in — so there
+ * is no org-type gate here. Returns the plaintext token exactly once; only its hash + display
+ * prefix are stored.
  */
 export async function createInvitation(
   ctx: AppContext,
@@ -86,17 +88,6 @@ export async function createInvitation(
   input: { role?: OrgRole } = {},
 ): Promise<CreatedInvitation> {
   await assertOrgMember(ctx, orgId, userId)
-  const [org] = await ctx.db
-    .select({ isPersonal: organizations.isPersonal })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1)
-  if (org === undefined) {
-    throw notFound('Organization')
-  }
-  if (org.isPersonal) {
-    throw badRequest('Personal organizations cannot have additional members.')
-  }
 
   const token = newInviteToken()
   const expiresAt = new Date(Date.now() + INVITE_TTL_SECONDS * 1000)

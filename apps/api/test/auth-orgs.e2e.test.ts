@@ -432,7 +432,8 @@ describe('org invitations', () => {
   const INVITEE = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
   const OTHER = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
 
-  /** A shared (non-personal) org owned by the seeded system user — invites require one. */
+  /** A second org owned by the seeded system user (not their auto-provisioned personal org) — gives
+   * the multi-member invite flows a known owner without touching the seeded user's home org. */
   async function sharedOrg(): Promise<string> {
     const [org] = await h.ctx.db.insert(organizations).values({ name: 'Shared Org' }).returning({ id: organizations.id })
     if (org === undefined) {
@@ -469,10 +470,28 @@ describe('org invitations', () => {
     expect(JSON.stringify(row)).not.toContain(res.data?.token ?? '')
   })
 
-  test('invites can only be minted in shared orgs, not personal ones (400)', async () => {
+  test('a personal org can mint invites — every org can have members', async () => {
     const orgId = await personalOrgId()
     const res = await h.api.api.organizations({ orgId }).invitations.post({})
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(200)
+    expect(res.data?.token?.startsWith('wln_inv_')).toBe(true)
+  })
+
+  test('a second user can accept an invite into a personal org and join it', async () => {
+    const orgId = await personalOrgId()
+    const { token } = await createInvite(orgId)
+    const invitee = await h.clientFor(INVITEE, { email: 'invitee@example.com' })
+    await invitee.api.organizations.get()
+
+    const res = await invitee.api.invitations({ token }).accept.post()
+    expect(res.status).toBe(200)
+    expect(res.data?.organizationId).toBe(orgId)
+
+    const members = (await h.api.api.organizations({ orgId }).members.get()).data ?? []
+    expect(members.length).toBe(2)
+    expect(members.find((m) => m.userId === INVITEE)?.role).toBe('member')
+    // Real membership: the invitee can read the (formerly solo) org's projects.
+    expect((await invitee.api.organizations({ orgId }).projects.get()).status).toBe(200)
   })
 
   test('GET lists live invites (never leaking the token); revoke drops them from the list', async () => {

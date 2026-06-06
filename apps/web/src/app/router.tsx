@@ -31,7 +31,10 @@ const indexRoute = createRoute({
       queryClient.ensureQueryData({ queryKey: keys.me(), queryFn: fetchMe }),
       queryClient.ensureQueryData({ queryKey: keys.orgs(), queryFn: fetchOrganizations }),
     ])
-    const target = orgs.find((o) => o.isPersonal) ?? orgs[0]
+    // Land the user on their OWN home org. Since members can now be invited into anyone's personal
+    // org, a user can belong to several `isPersonal` orgs — so match on the one they *own* (their
+    // home org) first, falling back to any personal org, then the first org.
+    const target = orgs.find((o) => o.isPersonal && o.role === 'owner') ?? orgs.find((o) => o.isPersonal) ?? orgs[0]
     if (target === undefined) {
       return
     }
