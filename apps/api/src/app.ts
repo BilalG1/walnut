@@ -49,12 +49,14 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
         return { error: 'not_found', message: 'Route not found.' }
       }
       set.status = 500
-      const message = error instanceof Error ? error.message : 'Internal server error'
       console.error('Unhandled error:', error)
       // The catch-all: anything reaching here is an unexpected server fault, so report it.
       // HttpError/VALIDATION/NOT_FOUND are handled above and never get here.
       captureException(error, { elysiaCode: code })
-      return { error: 'internal_error', message }
+      // Never leak the raw error message to the client — an unanticipated fault here is often
+      // a driver/DB error whose text can disclose schema, table/column names, or internal hosts.
+      // The real message is in the logs + Sentry above; the client gets a stable, generic one.
+      return { error: 'internal_error', message: 'An unexpected error occurred.' }
     })
     .get('/health', () => ({ status: 'ok' as const }))
     .use(meRoutes(ctx))
