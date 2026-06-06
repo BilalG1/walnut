@@ -24,7 +24,7 @@ export interface Env {
   databaseUrl: string
   corsOrigins: string[]
   provider: ProviderConfig
-  /** Object-store config for per-branch storage (MinIO locally, R2 in prod). */
+  /** Object-store config for per-branch storage (MinIO locally, a remote S3 store in prod). */
   blob: BlobProviderConfig
   auth: AuthEnv
   devAuth: DevAuthEnv
@@ -33,18 +33,21 @@ export interface Env {
 /**
  * Resolve the blob (object-store) provider config. `local` mirrors the database `local`
  * provider: everything derives from PORT_PREFIX (the MinIO endpoint) with the docker-compose
- * root credentials as defaults, so offline/test runs need no extra env. `r2` is production —
- * it requires an explicit endpoint, bucket, and credentials (fail closed if any is missing).
- * Individual `STORAGE_*` vars override the derived defaults, same posture as `DATABASE_URL`.
+ * root credentials as defaults, so offline/test runs need no extra env. `s3` is production —
+ * any remote S3-compatible store (R2, Railway Buckets, hosted MinIO). It requires an explicit
+ * endpoint, bucket, and credentials (fail closed if any is missing). Individual `STORAGE_*`
+ * vars override the derived defaults, same posture as `DATABASE_URL`.
  */
 function loadBlobConfig(prefix: string | undefined): BlobProviderConfig {
   const kind = (process.env.STORAGE_PROVIDER ?? 'local') as BlobProviderKind
-  if (kind !== 'local' && kind !== 'r2') {
-    throw new Error(`STORAGE_PROVIDER must be "local" or "r2", got "${kind}"`)
+  if (kind !== 'local' && kind !== 's3') {
+    throw new Error(`STORAGE_PROVIDER must be "local" or "s3", got "${kind}"`)
   }
   const region = process.env.STORAGE_REGION?.trim() || 'auto'
-  if (kind === 'r2') {
-    // Production: every value is explicit — no `walnut`/MinIO defaults leak into prod.
+  if (kind === 's3') {
+    // Production: every value is explicit — no `walnut`/MinIO defaults leak into prod. Addressing
+    // defaults to virtual-hosted (what Railway/Tigris buckets require); set STORAGE_FORCE_PATH_STYLE
+    // for stores that need path-style (a custom-endpoint R2, a remote MinIO).
     return {
       kind,
       endpoint: required('STORAGE_ENDPOINT'),
@@ -52,9 +55,11 @@ function loadBlobConfig(prefix: string | undefined): BlobProviderConfig {
       accessKeyId: required('STORAGE_ACCESS_KEY_ID'),
       secretAccessKey: required('STORAGE_SECRET_ACCESS_KEY'),
       region,
+      pathStyle: process.env.STORAGE_FORCE_PATH_STYLE === '1' || process.env.STORAGE_FORCE_PATH_STYLE === 'true',
     }
   }
   // Local: derive everything from PORT_PREFIX + the docker-compose MinIO root credentials.
+  // MinIO needs path-style addressing.
   return {
     kind,
     endpoint: process.env.STORAGE_ENDPOINT?.trim() || localS3Endpoint(prefix),
@@ -62,6 +67,7 @@ function loadBlobConfig(prefix: string | undefined): BlobProviderConfig {
     accessKeyId: process.env.STORAGE_ACCESS_KEY_ID?.trim() || 'walnut',
     secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY?.trim() || 'walnutminio',
     region,
+    pathStyle: true,
   }
 }
 

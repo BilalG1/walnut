@@ -12,8 +12,8 @@ export type {
 export { isSha256, physicalKey, projectKeyPrefix, stagingKey } from './keys.ts'
 
 /**
- * Build a {@link BlobProvider} from config. Both `local` (MinIO) and `r2` are S3-compatible,
- * so they share one implementation — the storage analog of `createProvider` for the database.
+ * Build a {@link BlobProvider} from config. Both `local` (MinIO) and `s3` (R2 / Railway / any
+ * S3-compatible store) share one implementation — the storage analog of `createProvider`.
  */
 export function createBlobProvider(config: BlobProviderConfig): BlobProvider {
   if (config.endpoint === '' || config.bucket === '' || config.accessKeyId === '' || config.secretAccessKey === '') {

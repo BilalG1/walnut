@@ -81,8 +81,8 @@ export function localServiceUrl(service: PortService, prefix?: string, host = 'l
 }
 
 /** The local MinIO S3 endpoint (`http://host:<prefix>03`) the `local` blob provider targets —
- * the storage analog of {@link localPostgresUrl}. Production points at R2 via an explicit
- * endpoint instead; this keeps the single-knob promise for offline/test runs. */
+ * the storage analog of {@link localPostgresUrl}. Production points at a remote S3 endpoint
+ * instead; this keeps the single-knob promise for offline/test runs. */
 export function localS3Endpoint(prefix?: string, host = 'localhost'): string {
   return localServiceUrl('minio', prefix, host)
 }

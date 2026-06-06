@@ -23,8 +23,9 @@ services:
       timeout: 5s
       retries: 10
 
-  # MinIO — the local, S3-compatible object store backing per-branch storage. Prod uses
-  # Cloudflare R2; both speak S3, so the same blob code path runs here. The bucket is
+  # MinIO — the local, S3-compatible object store backing per-branch storage. Prod uses a
+  # remote S3-compatible store (R2, Railway Buckets, …); all speak S3, so the same blob code
+  # path runs here. The bucket is
   # created in-process by the blob provider's ensureBucket() on API/test startup, so no
   # init container is needed. S3 API on <prefix>03, web console on <prefix>04.
   minio:

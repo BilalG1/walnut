@@ -5,8 +5,10 @@
  * Postgres layered manifest; this interface only moves opaque bytes by physical key.
  *
  * Two implementations, mirroring `local`/`neon` for the database:
- *  - `local`  — MinIO in docker-compose, for tests/offline dev.
- *  - `r2`     — Cloudflare R2 in production (no egress fees; agents read constantly).
+ *  - `local` — MinIO in docker-compose, for tests/offline dev.
+ *  - `s3`    — any remote S3-compatible store in production: Cloudflare R2, Railway Buckets
+ *              (Tigris), a hosted MinIO, etc. They differ only in endpoint/credentials and
+ *              addressing style (see `pathStyle`), not behaviour.
  * Both speak S3, so prod and local exercise the same code path (see `s3.ts`).
  *
  * Bytes never stream through the API: callers mint short-TTL, single-object presigned URLs
@@ -15,7 +17,7 @@
  * there is no engine-level backstop), so authorization happens at presign time over the
  * resolved `(branch, path)` — never by trusting a client-supplied key.
  */
-export type BlobProviderKind = 'local' | 'r2'
+export type BlobProviderKind = 'local' | 's3'
 
 export interface PresignOptions {
   /** TTL in seconds for the minted URL — kept short (~60s) so a leaked URL expires fast. */
@@ -60,8 +62,9 @@ export interface BlobProvider {
 
 export interface BlobProviderConfig {
   kind: BlobProviderKind
-  /** S3 endpoint. For `local` this is the MinIO URL (derive from PORT_PREFIX); for `r2` the
-   * account endpoint (`https://<account>.r2.cloudflarestorage.com`). */
+  /** S3 endpoint. For `local` this is the MinIO URL (derive from PORT_PREFIX); for `s3` the
+   * provider's endpoint — R2 (`https://<account>.r2.cloudflarestorage.com`), Railway Buckets
+   * (`https://storage.railway.app`), etc. */
   endpoint: string
   /** The single bucket all projects share; keys are project-prefixed for isolation. */
   bucket: string
@@ -69,4 +72,9 @@ export interface BlobProviderConfig {
   secretAccessKey: string
   /** S3 region. R2 ignores it ("auto"); MinIO accepts any value. */
   region?: string
+  /** Use path-style addressing (`<endpoint>/<bucket>/<key>`) instead of virtual-hosted
+   * (`<bucket>.<endpoint>/<key>`). MinIO needs path-style; Railway/Tigris buckets require
+   * virtual-hosted; R2 works with either. Defaults to path-style when unset (the historical
+   * behaviour); the `s3` provider sets it explicitly per its endpoint. */
+  pathStyle?: boolean
 }

@@ -14,7 +14,7 @@ import type { AuthVerifier } from './auth/verify.ts'
 export interface AppContext {
   db: Database
   provider: DatabaseProvider
-  /** The object store backing per-branch storage (MinIO locally, R2 in prod). */
+  /** The object store backing per-branch storage (MinIO locally, a remote S3 store in prod). */
   blobProvider: BlobProvider
   /** Verifies user access tokens for the dashboard API. */
   auth: AuthVerifier

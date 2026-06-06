@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "bun --env-file=../../.env --watch src/index.ts",
-    "start": "bun --env-file=../../.env src/index.ts",
+    "start": "bun src/index.ts",
     "typecheck": "tsgo --noEmit",
     "test": "bun test"
   },

@@ -2,23 +2,23 @@ import { signPutBucket } from './sigv4.ts'
 import type { BlobHead, BlobProvider, BlobProviderConfig, PresignOptions, PresignPutOptions } from './types.ts'
 
 /**
- * The one S3-speaking `BlobProvider` implementation, shared by the `local` (MinIO) and `r2`
- * providers — they differ only in config (endpoint/credentials), so prod and local exercise
- * the exact same code path. Built on Bun's native `S3Client` (presign/stat/delete), so there
- * is no external AWS SDK dependency.
+ * The one S3-speaking `BlobProvider` implementation, shared by the `local` (MinIO) and `s3`
+ * providers — they differ only in config (endpoint/credentials/addressing), so prod and local
+ * exercise the exact same code path. Built on Bun's native `S3Client` (presign/stat/delete), so
+ * there is no external AWS SDK dependency.
  *
- * Path-style addressing (`virtualHostedStyle: false`) — MinIO needs it, and R2 supports it —
- * so a single endpoint form works for both.
+ * Addressing style is config-driven (`pathStyle`): MinIO needs path-style, Railway/Tigris
+ * buckets require virtual-hosted, R2 works with either. Defaults to path-style when unset.
  */
 function createS3BlobProvider(config: BlobProviderConfig): BlobProvider {
-  const { kind, endpoint, bucket, accessKeyId, secretAccessKey, region = 'auto' } = config
+  const { kind, endpoint, bucket, accessKeyId, secretAccessKey, region = 'auto', pathStyle } = config
   const client = new Bun.S3Client({
     endpoint,
     bucket,
     accessKeyId,
     secretAccessKey,
     region,
-    virtualHostedStyle: false,
+    virtualHostedStyle: pathStyle === false,
   })
 
   return {
@@ -74,7 +74,12 @@ function createS3BlobProvider(config: BlobProviderConfig): BlobProvider {
         nowIso: new Date().toISOString(),
       })
       const res = await fetch(url, { method: 'PUT', headers })
-      if (!res.ok && res.status !== 409) {
+      // 200 = created, 409 BucketAlreadyOwnedByYou = already ours — both success. 403 = a
+      // bucket-scoped credential (Railway/Tigris, R2 API tokens) that can't create buckets but
+      // whose bucket is pre-provisioned out of band: tolerate it rather than refuse to boot —
+      // a genuinely broken credential still surfaces on the first head/presign. Anything else
+      // (misconfigured endpoint, 5xx) is a real failure and must abort startup.
+      if (!res.ok && res.status !== 409 && res.status !== 403) {
         throw new Error(`Failed to create bucket "${bucket}": ${res.status} ${await res.text()}`)
       }
     },
