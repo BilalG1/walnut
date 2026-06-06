@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { queryClient } from '../app/queryClient.ts'
 import { authConfig } from '../lib/auth/config.ts'
 import { decodeJwt } from '../lib/auth/jwt.ts'
 import { signInWithOAuth, type OAuthProvider } from '../lib/auth/oauth.ts'
@@ -58,8 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [localAutoPending, setLocalAutoPending] = useState<boolean>(authConfig.localAuth && !suppressAutoSignIn())
 
   // The token store is the source of truth; mirror its sign-in/out events into state
-  // (also catches a failed refresh that clears the session under us).
-  useEffect(() => subscribe(() => setUser(readUser())), [])
+  // (also catches a failed refresh that clears the session under us). On any identity
+  // change — sign-in, sign-out, or switching to a different local user — drop the whole
+  // React Query cache so one identity's data can never bleed into the next session.
+  const prevUserIdRef = useRef<string | null>(user?.id ?? null)
+  useEffect(
+    () =>
+      subscribe(() => {
+        const next = readUser()
+        const nextId = next?.id ?? null
+        if (prevUserIdRef.current !== nextId) {
+          prevUserIdRef.current = nextId
+          queryClient.clear()
+        }
+        setUser(next)
+      }),
+    [],
+  )
 
   // Local auth: auto-sign-in as the default user whenever there's no session — on first
   // load and again if a stale session is cleared (e.g. the API restarted with a new key).
