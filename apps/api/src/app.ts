@@ -1,6 +1,7 @@
 import { cors } from '@elysiajs/cors'
 import { Elysia } from 'elysia'
 import type { HexclaveServerClient } from './auth/hexclave-server.ts'
+import type { LocalAuth } from './auth/local-auth.ts'
 import type { AppContext } from './context.ts'
 import { HttpError } from './errors.ts'
 import { captureException } from './observability.ts'
@@ -8,6 +9,7 @@ import { agentApiRoutes } from './routes/agent.ts'
 import { agentRoutes } from './routes/agents.ts'
 import { devAuthRoutes } from './routes/dev-auth.ts'
 import { invitationRoutes } from './routes/invitations.ts'
+import { localAuthRoutes } from './routes/local-auth.ts'
 import { meRoutes } from './routes/me.ts'
 import { organizationRoutes } from './routes/organizations.ts'
 import { projectRoutes } from './routes/projects.ts'
@@ -19,6 +21,9 @@ export interface AppOptions {
   /** When set, mounts the dev-only `POST /dev/auth/login` bypass (see devAuthRoutes).
    * Provided only in dev/test; never on a production request path. */
   devLogin?: HexclaveServerClient
+  /** When set (local auth mode), mounts `POST /auth/local/login|refresh` — the offline,
+   * passwordless self-host sign-in. See localAuthRoutes. */
+  localAuth?: LocalAuth
 }
 
 export function createApp(ctx: AppContext, options: AppOptions = {}) {
@@ -61,10 +66,14 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
     .use(agentApiRoutes(ctx))
     .use(storageApiRoutes(ctx))
 
-  // Mounted for its runtime side effect only; deliberately kept out of the exported
-  // `App` type so it never becomes part of the typed client contract.
+  // Mounted for their runtime side effect only; deliberately kept out of the exported
+  // `App` type so the auth bootstrap endpoints never become part of the typed client
+  // contract (the dashboard calls them via plain fetch, like dev-login).
   if (options.devLogin !== undefined) {
     app.use(devAuthRoutes(options.devLogin))
+  }
+  if (options.localAuth !== undefined) {
+    app.use(localAuthRoutes(options.localAuth))
   }
 
   return app

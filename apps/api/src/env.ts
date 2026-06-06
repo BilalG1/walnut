@@ -2,8 +2,11 @@ import type { BlobProviderConfig, BlobProviderKind, ProviderConfig, ProviderKind
 import { localPostgresUrl, localS3Endpoint, localServiceUrl, portFor } from '@walnut/core/ports'
 
 export interface AuthEnv {
-  /** Hexclave project id; also the access-token audience. */
-  projectId: string
+  /** How the dashboard authenticates users. `hexclave` verifies real Hexclave tokens;
+   * `local` runs a built-in offline, passwordless provider (the self-host default). */
+  mode: 'hexclave' | 'local'
+  /** Hexclave project id (also the access-token audience). Set only in `hexclave` mode. */
+  projectId?: string
   /** Hexclave API base, e.g. `https://api.hexclave.com`. */
   apiBaseUrl: string
 }
@@ -70,6 +73,37 @@ function required(name: string): string {
   return value
 }
 
+/**
+ * Resolve dashboard auth config. Mirrors the storage/db providers: `local` is the
+ * zero-config default (a built-in offline provider — no Hexclave signup), `hexclave`
+ * verifies real Hexclave tokens. The mode defaults to `hexclave` when a project id is
+ * present (our hosted deploys set it) and `local` otherwise (a fresh self-host clone),
+ * so out-of-the-box self-hosting needs no auth env at all. `AUTH_PROVIDER` forces it.
+ */
+function loadAuthConfig(isProduction: boolean): AuthEnv {
+  const apiBaseUrl = process.env.HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com'
+  const projectId = process.env.HEXCLAVE_PROJECT_ID?.trim()
+  const explicit = process.env.AUTH_PROVIDER
+  // In production, refuse to SILENTLY fall back to passwordless local auth — an unset or
+  // typo'd HEXCLAVE_PROJECT_ID must fail loudly, not boot an open, anyone-can-sign-in
+  // dashboard. Self-hosters who genuinely want local auth in prod opt in explicitly with
+  // AUTH_PROVIDER=local (so the choice is deliberate, not a misconfiguration). Same loud-
+  // misconfiguration posture as the CORS and dev-bypass guards below.
+  if (isProduction && explicit === undefined && !projectId) {
+    throw new Error(
+      'No auth configured in production: set HEXCLAVE_PROJECT_ID for Hexclave auth, or AUTH_PROVIDER=local to deliberately enable the built-in passwordless auth — refusing to default to passwordless silently.',
+    )
+  }
+  const mode = (explicit ?? (projectId ? 'hexclave' : 'local')) as 'hexclave' | 'local'
+  if (mode !== 'hexclave' && mode !== 'local') {
+    throw new Error(`AUTH_PROVIDER must be "hexclave" or "local", got "${mode}"`)
+  }
+  if (mode === 'hexclave') {
+    return { mode, projectId: required('HEXCLAVE_PROJECT_ID'), apiBaseUrl }
+  }
+  return { mode, projectId, apiBaseUrl }
+}
+
 export function loadEnv(): Env {
   const isProduction = process.env.NODE_ENV === 'production'
 
@@ -115,10 +149,7 @@ export function loadEnv(): Env {
       neonApiKey: process.env.NEON_API_KEY,
     },
     blob: loadBlobConfig(prefix),
-    auth: {
-      projectId: required('HEXCLAVE_PROJECT_ID'),
-      apiBaseUrl: process.env.HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com',
-    },
+    auth: loadAuthConfig(isProduction),
     devAuth: {
       enabled: devBypassRequested && !isProduction,
       secretServerKey: process.env.HEXCLAVE_SECRET_SERVER_KEY,

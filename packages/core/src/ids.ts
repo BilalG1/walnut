@@ -22,6 +22,22 @@ export function hashKey(key: string): string {
   return createHash('sha256').update(key).digest('hex')
 }
 
+/**
+ * RFC 4122 name-based UUIDv5 (SHA-1) — a stable, deterministic uuid for a `(namespace,
+ * name)` pair. The same inputs always yield the same uuid, so it's how we derive a fixed
+ * platform user id from a stable string (e.g. a local-auth email). `namespace` must be a
+ * canonical uuid string.
+ */
+export function uuidv5(namespace: string, name: string): string {
+  const nsBytes = Buffer.from(namespace.replace(/-/g, ''), 'hex')
+  const digest = createHash('sha1').update(nsBytes).update(name).digest()
+  const bytes = Array.from(digest.subarray(0, 16))
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50 // version 5
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80 // RFC 4122 variant
+  const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 /** Non-secret prefix kept for display (e.g. `wln_agt_1a2b…`). */
 export function keyPrefix(key: string): string {
   return key.slice(0, 12)

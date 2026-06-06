@@ -8,6 +8,7 @@ const KEYS = [
   'NODE_ENV',
   'CORS_ORIGIN',
   'AUTH_DEV_BYPASS',
+  'AUTH_PROVIDER',
   'HEXCLAVE_PROJECT_ID',
   'HEXCLAVE_SECRET_SERVER_KEY',
   'HEXCLAVE_API_BASE_URL',
@@ -27,7 +28,9 @@ beforeEach(() => {
     saved[key] = process.env[key]
     delete process.env[key]
   }
-  // The minimum loadEnv requires to succeed at all.
+  // A Hexclave project id present by default, so most cases exercise hexclave auth mode.
+  // (loadEnv needs no auth env at all — it falls back to local mode; the auth-mode suite
+  // covers that explicitly.)
   process.env.HEXCLAVE_PROJECT_ID = 'proj_test'
 })
 
@@ -101,8 +104,50 @@ describe('loadEnv — provider', () => {
     expect(() => loadEnv()).toThrow(/DB_PROVIDER must be/)
   })
 
-  test('requires HEXCLAVE_PROJECT_ID', () => {
+})
+
+describe('loadEnv — auth provider', () => {
+  test('uses hexclave mode when a project id is set', () => {
+    const auth = loadEnv().auth
+    expect(auth.mode).toBe('hexclave')
+    expect(auth.projectId).toBe('proj_test')
+  })
+
+  test('falls back to local mode when no Hexclave project id is configured', () => {
     delete process.env.HEXCLAVE_PROJECT_ID
+    const auth = loadEnv().auth
+    expect(auth.mode).toBe('local')
+    expect(auth.projectId).toBeUndefined()
+  })
+
+  test('AUTH_PROVIDER=local forces local mode even with a project id present', () => {
+    process.env.AUTH_PROVIDER = 'local'
+    expect(loadEnv().auth.mode).toBe('local')
+  })
+
+  test('AUTH_PROVIDER=hexclave still requires HEXCLAVE_PROJECT_ID', () => {
+    delete process.env.HEXCLAVE_PROJECT_ID
+    process.env.AUTH_PROVIDER = 'hexclave'
     expect(() => loadEnv()).toThrow(/HEXCLAVE_PROJECT_ID/)
+  })
+
+  test('rejects an unknown AUTH_PROVIDER', () => {
+    process.env.AUTH_PROVIDER = 'auth0'
+    expect(() => loadEnv()).toThrow(/AUTH_PROVIDER must be/)
+  })
+
+  test('refuses to silently fall back to local auth in production', () => {
+    process.env.NODE_ENV = 'production'
+    process.env.CORS_ORIGIN = 'https://app.example.com'
+    delete process.env.HEXCLAVE_PROJECT_ID
+    expect(() => loadEnv()).toThrow(/No auth configured in production/)
+  })
+
+  test('allows local auth in production when opted in explicitly', () => {
+    process.env.NODE_ENV = 'production'
+    process.env.CORS_ORIGIN = 'https://app.example.com'
+    delete process.env.HEXCLAVE_PROJECT_ID
+    process.env.AUTH_PROVIDER = 'local'
+    expect(loadEnv().auth.mode).toBe('local')
   })
 })
