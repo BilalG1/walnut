@@ -1,6 +1,10 @@
+import { MAX_CONCURRENT_QUERIES_PER_BRANCH, type QueryResult } from '@walnut/core'
+import type { Branch } from '@walnut/db'
 import { Elysia, t } from 'elysia'
 import { authenticate } from '../auth/middleware.ts'
 import type { AppContext } from '../context.ts'
+import { HttpError } from '../errors.ts'
+import { enforceRate } from '../rate-limit.ts'
 import {
   toActivityEventView,
   toBranchDetail,
@@ -41,6 +45,27 @@ const sqlBody = t.Object({
   sql: t.String({ minLength: 1 }),
   params: t.Optional(t.Array(t.Union([t.String(), t.Number(), t.Boolean(), t.Null(), t.Array(t.Unknown())]))),
 })
+
+/** Run a dashboard data-viewer query under the same per-branch concurrency gauge the agent
+ * query path uses (both open a connection to the branch DB) — so the human viewer and agents
+ * share one bound on concurrent connections per branch. The per-user request rate is clipped
+ * separately by the caller (`dashboardQueryPerUser`). */
+async function runViewerQuery(ctx: AppContext, branch: Branch, sql: string, params: unknown[]): Promise<QueryResult> {
+  const release = ctx.rateLimiter.acquire(`branch:${branch.id}`, MAX_CONCURRENT_QUERIES_PER_BRANCH)
+  if (release === null) {
+    throw new HttpError(429, {
+      error: 'too_many_concurrent_queries',
+      message: `Too many concurrent queries on branch "${branch.name}". Retry shortly.`,
+      limit: 'concurrent_queries_per_branch',
+      retryAfterMs: 0,
+    })
+  }
+  try {
+    return await runReadOnlyQuery(branch, sql, params)
+  } finally {
+    release()
+  }
+}
 
 export function projectRoutes(ctx: AppContext) {
   return new Elysia({ prefix: '/api/projects' })
@@ -125,18 +150,20 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/sql',
       async ({ userId, params, body }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardQueryPerUser', userId)
         await getProject(ctx, params.id, userId)
         const main = await getDefaultBranch(ctx, params.id)
-        return runReadOnlyQuery(main, body.sql, body.params ?? [])
+        return runViewerQuery(ctx, main, body.sql, body.params ?? [])
       },
       { params: idParams, body: sqlBody },
     )
     .post(
       '/:id/branches/:branch/sql',
       async ({ userId, params, body }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardQueryPerUser', userId)
         await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
-        return runReadOnlyQuery(branch, body.sql, body.params ?? [])
+        return runViewerQuery(ctx, branch, body.sql, body.params ?? [])
       },
       { params: branchParams, body: sqlBody },
     )
@@ -149,6 +176,7 @@ export function projectRoutes(ctx: AppContext) {
     .get(
       '/:id/branches/:branch/storage/ls',
       async ({ userId, params, query }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
         return listStorageObjects(ctx, branch, { prefix: query.prefix, after: query.after, limit: query.limit })
@@ -165,6 +193,7 @@ export function projectRoutes(ctx: AppContext) {
     .get(
       '/:id/branches/:branch/storage/stat',
       async ({ userId, params, query }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
         return statObject(ctx, branch, query.path)
@@ -174,6 +203,7 @@ export function projectRoutes(ctx: AppContext) {
     .get(
       '/:id/branches/:branch/storage/download',
       async ({ userId, params, query }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
         return downloadObject(ctx, branch, query.path)
@@ -183,6 +213,7 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/branches/:branch/storage/upload',
       async ({ userId, params, body }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         const project = await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
         return createUpload(ctx, project, branch, {
@@ -205,6 +236,7 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/branches/:branch/storage/commit',
       async ({ userId, params, body }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         const project = await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
         return commitUpload(ctx, project, branch, { path: body.path })
@@ -214,6 +246,7 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/branches/:branch/storage/delete',
       async ({ userId, params, body }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         await getProject(ctx, params.id, userId)
         const branch = await resolveBranch(ctx, params.id, params.branch)
         return deleteObject(ctx, branch, { path: body.path })

@@ -134,6 +134,13 @@ export const RATE_LIMITS = {
    * 100 burst. Agents read storage constantly and unpredictably, so this is generous; it exists
    * to clip a runaway loop, and presign minting is the main thing it bounds. */
   storagePerAgent: { capacity: 100, refillPerSec: 50 },
+  /** Dashboard SQL data-viewer queries, keyed per user: mirrors {@link agentQuery} (40 burst,
+   * ~20/s). These run on the branch OWNER connection, so they're *also* bounded by the per-branch
+   * concurrency gauge ({@link MAX_CONCURRENT_QUERIES_PER_BRANCH}) — this clips the request rate. */
+  dashboardQueryPerUser: { capacity: 40, refillPerSec: 20 },
+  /** Dashboard storage operations, keyed per user: mirrors {@link storagePerAgent}. The dashboard
+   * storage browser mints presigns and lists objects like the agent API; this bounds that rate. */
+  dashboardStoragePerUser: { capacity: 100, refillPerSec: 50 },
   /** Scope requests, keyed per agent: 20/hour. */
   scopeRequestPerAgent: { capacity: 20, refillPerSec: 20 / 3600 },
   /** Agent key rotation, keyed per agent: 10/hour. */

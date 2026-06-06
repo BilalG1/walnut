@@ -241,4 +241,36 @@ describe('rate limits', () => {
     expect(res.status).toBe(429)
     expect((res.error?.value as ErrorBody | undefined)?.limit).toBe('keyRotationPerAgent')
   })
+
+  test('the dashboard SQL viewer is rate-limited per user', async () => {
+    const project = await newProject()
+    drain('dashboardQueryPerUser', SYSTEM_USER_ID)
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT 1' })
+    expect(res.status).toBe(429)
+    expect((res.error?.value as ErrorBody | undefined)?.limit).toBe('dashboardQueryPerUser')
+  })
+
+  test('the dashboard SQL viewer shares the per-branch concurrency cap', async () => {
+    const project = await newProject()
+    const [main] = await h.ctx.db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(and(eq(branches.projectId, project.id), eq(branches.isDefault, true)))
+    if (main === undefined) throw new Error('no main branch')
+    // Hold every slot for the branch (the same gauge the agent query path uses).
+    for (let i = 0; i < MAX_CONCURRENT_QUERIES_PER_BRANCH; i++) {
+      h.ctx.rateLimiter.acquire(`branch:${main.id}`, MAX_CONCURRENT_QUERIES_PER_BRANCH)
+    }
+    const res = await h.api.api.projects({ id: project.id }).sql.post({ sql: 'SELECT 1' })
+    expect(res.status).toBe(429)
+    expect((res.error?.value as ErrorBody | undefined)?.error).toBe('too_many_concurrent_queries')
+  })
+
+  test('dashboard storage operations are rate-limited per user', async () => {
+    const project = await newProject()
+    drain('dashboardStoragePerUser', SYSTEM_USER_ID)
+    const res = await h.api.api.projects({ id: project.id }).branches({ branch: 'main' }).storage.ls.get()
+    expect(res.status).toBe(429)
+    expect((res.error?.value as ErrorBody | undefined)?.limit).toBe('dashboardStoragePerUser')
+  })
 })
