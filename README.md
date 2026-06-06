@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-# Walnut Cloud
+<h1 align="center">Walnut</h1>
 
 **An agent-first alternative to Supabase.** Walnut gives your AI agents real cloud
 infrastructure — a Postgres database and object storage per branch — but behind **agent
