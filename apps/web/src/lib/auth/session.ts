@@ -24,15 +24,73 @@ export async function devLogin(email: string): Promise<void> {
 }
 
 /**
- * Refresh the access token using the stored refresh token (Hexclave OAuth token
- * endpoint, the same one the OAuth code exchange uses). Returns the new access token,
- * or null if there's no refresh token or the refresh was rejected. Rotates the refresh
- * token when Hexclave returns a new one.
+ * Local (self-host) sign-in: mint a session from the built-in offline auth provider.
+ * With no email it signs in as the single default local user; pass one to use a distinct
+ * (stable) identity. Stores the tokens so the rest of the app is authed identically to
+ * any other sign-in.
+ */
+export async function localLogin(email?: string): Promise<void> {
+  const res = await fetch(`${authConfig.apiUrl}/auth/local/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(email === undefined ? {} : { email }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string }
+    throw new Error(body.message ?? `Local sign-in failed (${res.status}).`)
+  }
+  const data = (await res.json()) as { accessToken?: unknown; refreshToken?: unknown }
+  if (typeof data.accessToken !== 'string' || typeof data.refreshToken !== 'string') {
+    throw new Error('Local sign-in returned an unexpected response.')
+  }
+  setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken })
+}
+
+/** Refresh against the local auth provider's stateless `/auth/local/refresh` endpoint. */
+async function refreshLocal(refreshToken: string): Promise<string | null> {
+  let res: Response
+  try {
+    res = await fetch(`${authConfig.apiUrl}/auth/local/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    })
+  } catch {
+    return null
+  }
+  if (!res.ok) {
+    return null
+  }
+  const data = (await res.json().catch(() => ({}))) as { accessToken?: unknown; refreshToken?: unknown }
+  if (typeof data.accessToken !== 'string') {
+    return null
+  }
+  // Guard against a concurrent sign-out / newer refresh (see the Hexclave path below).
+  if (getRefreshToken() !== refreshToken) {
+    return null
+  }
+  if (typeof data.refreshToken === 'string') {
+    setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken })
+  } else {
+    setAccessToken(data.accessToken)
+  }
+  return data.accessToken
+}
+
+/**
+ * Refresh the access token using the stored refresh token. In local auth mode this hits
+ * the built-in provider's refresh endpoint; otherwise the Hexclave OAuth token endpoint
+ * (the same one the OAuth code exchange uses). Returns the new access token, or null if
+ * there's no refresh token or the refresh was rejected. Rotates the refresh token when a
+ * new one comes back.
  */
 export async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = getRefreshToken()
   if (refreshToken === null) {
     return null
+  }
+  if (authConfig.localAuth) {
+    return refreshLocal(refreshToken)
   }
   const body = new URLSearchParams({
     grant_type: 'refresh_token',

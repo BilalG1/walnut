@@ -10,7 +10,20 @@ import { authConfig } from '../lib/auth/config.ts'
 import type { OAuthProvider } from '../lib/auth/oauth.ts'
 import { useAuth } from './AuthProvider.tsx'
 
+/** The single default identity for a self-host instance (matches the API's default). */
+const DEFAULT_LOCAL_EMAIL = 'user@walnut.local'
+
 export function SignIn() {
+  // Self-host (local auth): a built-in, passwordless sign-in. The dashboard auto-signs-in
+  // as the default user, so this screen is mostly a brief spinner — and the manual switch-
+  // user form after an explicit sign-out.
+  if (authConfig.localAuth) {
+    return <LocalSignIn />
+  }
+  return <OAuthSignIn />
+}
+
+function OAuthSignIn() {
   const { signInWithOAuth } = useAuth()
   const { theme } = useTheme()
   const walnutLogo = theme === 'dark' ? walnutLogoDark : walnutLogoLight
@@ -66,6 +79,87 @@ export function SignIn() {
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * Self-host sign-in. The dashboard auto-signs-in as the default local user, so this is
+ * usually just a momentary spinner. After an explicit sign-out (or if the auto sign-in
+ * fails), it offers a one-click "continue as the default user" plus an optional field to
+ * sign in as a different (stable) identity for local multi-user testing.
+ */
+function LocalSignIn() {
+  const { signInWithLocal, localAutoPending } = useAuth()
+  const { theme } = useTheme()
+  const walnutLogo = theme === 'dark' ? walnutLogoDark : walnutLogoLight
+  const [email, setEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function signIn(asEmail?: string) {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await signInWithLocal(asEmail)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed.')
+      setSubmitting(false)
+    }
+  }
+
+  const busy = localAutoPending || submitting
+
+  return (
+    <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center px-5 py-16">
+      <div className="mb-6 flex flex-col items-center gap-2 text-center">
+        <img src={walnutLogo} alt="Walnut Cloud" className="h-12 w-12" />
+        <h1 className="text-lg font-semibold tracking-tight text-fg">Welcome to Walnut</h1>
+        <p className="text-xs text-subtle">Self-hosted · signed in locally, no account needed</p>
+      </div>
+
+      <div className="flex w-full flex-col gap-3">
+        <Button variant="primary" disabled={busy} onClick={() => void signIn()}>
+          {localAutoPending ? 'Signing you in…' : `Continue as ${DEFAULT_LOCAL_EMAIL}`}
+        </Button>
+
+        {!localAutoPending && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (email.trim() !== '') {
+                void signIn(email.trim())
+              }
+            }}
+            className="flex flex-col gap-1.5"
+          >
+            <label htmlFor="local-email" className="text-[11px] uppercase tracking-wide text-subtle">
+              or sign in as a different user
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                id="local-email"
+                type="email"
+                aria-label="local sign-in email"
+                placeholder="you@walnut.local"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="min-w-0 flex-1 rounded border border-line-strong bg-sunken px-2 py-1 text-sm text-fg outline-none focus:border-walnut-500"
+              />
+              <button
+                type="submit"
+                disabled={busy || email.trim() === ''}
+                aria-label="Sign in"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded bg-walnut-500 text-white transition hover:bg-walnut-600 disabled:opacity-40"
+              >
+                <ArrowRightIcon />
+              </button>
+            </div>
+          </form>
+        )}
+
+        {error !== null && <p className="text-xs text-danger">{error}</p>}
+      </div>
+    </div>
   )
 }
 

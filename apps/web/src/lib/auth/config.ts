@@ -12,14 +12,26 @@ function flag(value: string | undefined): boolean {
 const PUBLIC_CLIENT_SENTINEL = '__stack_public_client__'
 
 const publishableClientKey = import.meta.env.VITE_HEXCLAVE_PUBLISHABLE_CLIENT_KEY ?? ''
+const projectId = import.meta.env.VITE_HEXCLAVE_PROJECT_ID ?? ''
+
+/**
+ * Which auth provider the dashboard talks to. Mirrors the API's AUTH_PROVIDER resolution:
+ * `local` (the self-host default — a built-in offline, passwordless provider) unless a
+ * Hexclave project id is configured, in which case `hexclave`. `VITE_AUTH_PROVIDER` forces it.
+ */
+const authProvider = (import.meta.env.VITE_AUTH_PROVIDER ?? (projectId ? 'hexclave' : 'local')) as 'hexclave' | 'local'
 
 export const authConfig = {
-  /** The Walnut API base (dashboard + dev-login). */
+  /** The Walnut API base (dashboard + dev/local auth). */
   apiUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:3001',
   /** Hexclave API base, for OAuth + token refresh. */
   hexclaveApiBaseUrl: import.meta.env.VITE_HEXCLAVE_API_BASE_URL ?? 'https://api.hexclave.com',
   /** Hexclave project id (OAuth `client_id`). */
-  projectId: import.meta.env.VITE_HEXCLAVE_PROJECT_ID ?? '',
+  projectId,
+  /** The active auth provider (see above). */
+  authProvider,
+  /** True when running the built-in offline auth — the dashboard auto-signs-in. */
+  localAuth: authProvider === 'local',
   /** Publishable client key, if configured (not actually secret). */
   publishableClientKey,
   /** The value to send as OAuth `client_secret`: the real pck if set, else the sentinel
