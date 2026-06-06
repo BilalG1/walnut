@@ -61,8 +61,8 @@ async function resetSchema(): Promise<void> {
   }
 }
 
-/** Drop the per-project databases + roles this suite created (prefix-scoped, so it
- * never touches the api suite's `proj_*` artifacts). */
+/** Drop the per-project databases + roles this suite created (prefix-scoped to `clitest_*`, so it
+ * never touches the api suite's `apitest_*` or a local dev stack's `proj_*` artifacts). */
 async function dropProjectArtifacts(): Promise<void> {
   const admin = postgres(ADMIN_URL, { max: 1, prepare: false })
   const prefix = `${DB_PREFIX}_`

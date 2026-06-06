@@ -20,6 +20,10 @@ export type BlobProviderKind = 'local' | 'r2'
 export interface PresignOptions {
   /** TTL in seconds for the minted URL — kept short (~60s) so a leaked URL expires fast. */
   expiresInSeconds: number
+  /** Logical filename to force as the download name (via a signed `Content-Disposition`). Physical
+   * keys are content-addressed hashes, so without this a browser would save the file as the hash;
+   * set it to the object's logical base name so downloads keep their real name. */
+  downloadFilename?: string
 }
 
 export interface PresignPutOptions extends PresignOptions {

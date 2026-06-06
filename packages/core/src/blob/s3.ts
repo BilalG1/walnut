@@ -32,7 +32,12 @@ function createS3BlobProvider(config: BlobProviderConfig): BlobProvider {
     },
 
     async presignGet(key: string, options: PresignOptions): Promise<string> {
-      return client.presign(key, { method: 'GET', expiresIn: options.expiresInSeconds })
+      // Physical keys are content hashes, so without an explicit disposition the browser names
+      // the download after the hash. Bind a signed `Content-Disposition` carrying the logical
+      // filename so downloads keep their real name. (Signed into the URL, so it can't be tampered.)
+      const contentDisposition =
+        options.downloadFilename === undefined ? undefined : attachmentDisposition(options.downloadFilename)
+      return client.presign(key, { method: 'GET', expiresIn: options.expiresInSeconds, contentDisposition })
     },
 
     async head(key: string): Promise<BlobHead> {
@@ -74,6 +79,14 @@ function createS3BlobProvider(config: BlobProviderConfig): BlobProvider {
       }
     },
   }
+}
+
+/** Build an RFC 6266 `attachment` Content-Disposition for a download. Emits an ASCII-sanitized
+ * `filename=` (quotes/backslashes/control chars stripped) for legacy clients plus a
+ * `filename*=UTF-8''…` form so non-ASCII names survive intact. */
+function attachmentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'download'
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`
 }
 
 /** Whether an S3 error means the *object* is absent (NoSuchKey / HTTP 404) — as opposed to a

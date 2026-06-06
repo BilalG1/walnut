@@ -71,6 +71,9 @@ describe('storage — full roundtrip', () => {
     expect(dl.data?.contentType).toBe('text/plain')
     const fetched = await fetch(dl.data?.url ?? '')
     expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(bytes)
+    // The download is named by its logical base name, not the content-hash physical key (F3-a):
+    // the presigned GET carries a signed Content-Disposition that the store echoes back.
+    expect(fetched.headers.get('content-disposition')).toContain('filename="hello.txt"')
 
     // Stat: metadata only.
     const st = await h.api.agent.v1.storage.stat.get({

@@ -24,9 +24,21 @@ function provisioningError(err: unknown, what: string): HttpError {
       `The platform is at capacity (the database provider account hit its own quota). Please try again later.`,
     )
   }
-  const message = err instanceof Error ? err.message : 'Unknown provisioning error'
-  return new HttpError(502, { error: 'provisioning_failed', message: `Failed to provision ${what}: ${message}` })
+  // Never surface the raw provider/driver message to the client: it can leak internal
+  // identifiers (e.g. the per-branch database name) and is rarely actionable. Keep the detail
+  // server-side for operators; return a generic, retryable message.
+  console.error(`Provisioning failed (${what}):`, err)
+  captureException(err, { op: 'provisioning', what })
+  return new HttpError(502, {
+    error: 'provisioning_failed',
+    message: `Failed to provision the ${what}. This is usually transient — please try again.`,
+  })
 }
+
+/** Client-safe text stored on an errored project/branch row. The raw provider/driver error is
+ * kept only in logs (see {@link provisioningError}); the stored value is shown in the dashboard,
+ * so it must never carry internal identifiers like the per-branch database name. */
+const PROVISIONING_FAILED_STORED_MESSAGE = 'Provisioning failed. This is usually transient — please try again.'
 
 /** Burst-limit a provisioning op (create/delete project or branch). Per-user keeps one tenant
  * from storming; the shared `global` bucket shields the single Neon account's API rate limit
@@ -270,7 +282,6 @@ export async function createProject(
       .returning()
     return updated ?? created
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown provisioning error'
     // If the database was created but a later step failed, tear it down so we don't leak an
     // orphaned database. A container provider (Neon) is torn down whole; a flat provider (local)
     // by its branch database. If teardown *also* fails (provider still down), don't lose the
@@ -295,11 +306,11 @@ export async function createProject(
     }
     await ctx.db
       .update(projects)
-      .set({ status: 'error', error: message, providerProjectId: leakedProjectId })
+      .set({ status: 'error', error: PROVISIONING_FAILED_STORED_MESSAGE, providerProjectId: leakedProjectId })
       .where(eq(projects.id, created.id))
     await ctx.db
       .update(branches)
-      .set({ status: 'error', error: message, providerBranchId: leakedBranchId })
+      .set({ status: 'error', error: PROVISIONING_FAILED_STORED_MESSAGE, providerBranchId: leakedBranchId })
       .where(eq(branches.id, mainBranch.id))
     throw provisioningError(err, 'database')
   }
@@ -533,7 +544,6 @@ async function provisionBranch(
       .returning()
     return updated ?? created
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown provisioning error'
     let leaked = false
     if (provisioned !== undefined) {
       try {
@@ -559,7 +569,7 @@ async function provisionBranch(
         .update(branches)
         .set({
           status: 'error',
-          error: message,
+          error: PROVISIONING_FAILED_STORED_MESSAGE,
           providerBranchId: provisioned.providerBranchId,
           connectionUri: provisioned.connectionUri,
         })

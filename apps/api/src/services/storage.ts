@@ -603,6 +603,8 @@ export async function downloadObject(
   }
   const url = await ctx.blobProvider.presignGet(resolved.physicalKey, {
     expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds,
+    // Force the download to keep its logical name (the physical key is a content hash).
+    downloadFilename: path.split('/').pop() || path,
   })
   return { ...toView(resolved), url, expiresInSeconds: STORAGE_LIMITS.presignTtlSeconds }
 }

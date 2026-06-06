@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { runSql } from '@walnut/core'
 import { branches } from '@walnut/db'
 import { and, eq } from 'drizzle-orm'
+import postgres from 'postgres'
 import { bearer, type ErrorBody, grant, h, newAgent, newProject, useHarness } from './support.ts'
 
 useHarness()
@@ -212,6 +213,34 @@ describe('branches', () => {
     const res = await h.api.api.projects({ id: project.id }).branches.post({ name: 'has spaces' })
     expect(res.status).toBe(400)
   })
+
+  test('a provisioning failure does not leak the internal database name (F1-b)', async () => {
+    const project = await newProject('leakguard')
+    // Find the main branch's underlying database and drop it out from under the project, mimicking a
+    // vanished source DB. Cloning from it must then fail *without* echoing provider internals.
+    const [main] = await h.ctx.db
+      .select()
+      .from(branches)
+      .where(and(eq(branches.projectId, project.id), eq(branches.isDefault, true)))
+    const dbName = main?.providerBranchId ?? ''
+    const admin = postgres(new URL('/postgres', main?.connectionUri ?? '').toString(), { max: 1, prepare: false })
+    try {
+      await admin`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ${dbName} AND pid <> pg_backend_pid()`
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`)
+    } finally {
+      await admin.end({ timeout: 5 })
+    }
+
+    const res = await h.api.api.projects({ id: project.id }).branches.post({ name: 'feature' })
+    expect(res.status).toBe(502)
+    const body = res.error?.value as ErrorBody | undefined
+    expect(body?.error).toBe('provisioning_failed')
+    const message = body?.message ?? ''
+    // Scrubbed: the response carries neither the internal db name nor the raw provider text.
+    expect(message).not.toContain(dbName)
+    expect(message.toLowerCase()).not.toContain('template database')
+    expect(message).toContain('try again')
+  }, 30_000)
 
   test('the default branch cannot be deleted', async () => {
     const project = await newProject('keepmain')

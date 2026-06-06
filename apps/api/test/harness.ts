@@ -9,9 +9,13 @@ import { createTestAuth, type TestAuth } from '../src/auth/test-auth.ts'
 import { createContext, type OwnedContext } from '../src/context.ts'
 import { ensureSeed } from '../src/seed.ts'
 
-const ADMIN_URL =
+export const ADMIN_URL =
   process.env.TEST_PG_ADMIN_URL?.trim() || localPostgresUrl({ database: 'postgres', prefix: process.env.PORT_PREFIX })
 const TEST_DB = process.env.TEST_DB_NAME ?? 'walnut_test'
+/** Per-project database prefix for THIS suite — distinct from the local dev stack's `proj_*` and
+ * the cli suite's `clitest_*`. Cleanup is scoped to it, so a test run can never drop another
+ * environment's (or a parallel suite's) databases. */
+export const DB_PREFIX = 'apitest'
 
 function withDatabase(adminUrl: string, db: string): string {
   const url = new URL(adminUrl)
@@ -70,13 +74,15 @@ async function resetSchema(): Promise<void> {
   }
 }
 
-/** Drop every per-project database the local provider created during a test run. */
-async function dropProjectDatabases(): Promise<void> {
-  const admin = postgres(ADMIN_URL, { max: 1, prepare: false })
+/** Drop only the per-project databases + roles created under `prefix` (e.g. this suite's
+ * `apitest_*`). Prefix-scoped on purpose: a bare `proj_%` sweep would also drop a co-located local
+ * dev stack's real `proj_*` databases and the parallel cli suite's `clitest_*`, so cleanup must
+ * target exactly the artifacts this suite owns. Exported for the isolation regression test. */
+export async function dropDatabasesWithPrefix(adminUrl: string, prefix: string): Promise<void> {
+  const scoped = `${prefix}_`
+  const admin = postgres(adminUrl, { max: 1, prepare: false })
   try {
-    const rows = await admin<{ datname: string }[]>`
-      SELECT datname FROM pg_database WHERE datname LIKE 'proj_%'
-    `
+    const rows = await admin<{ datname: string }[]>`SELECT datname FROM pg_database WHERE datname ^@ ${scoped}`
     for (const { datname } of rows) {
       // Sequential by design: terminate the database's sessions, then drop it,
       // all over a single admin connection. Parallelising would race.
@@ -89,9 +95,7 @@ async function dropProjectDatabases(): Promise<void> {
       await admin.unsafe(`DROP DATABASE IF EXISTS "${datname}"`)
     }
     // Per-project roles are cluster-global, so they outlive the dropped databases.
-    const roles = await admin<{ rolname: string }[]>`
-      SELECT rolname FROM pg_roles WHERE rolname ^@ 'proj_'
-    `
+    const roles = await admin<{ rolname: string }[]>`SELECT rolname FROM pg_roles WHERE rolname ^@ ${scoped}`
     for (const { rolname } of roles) {
       // eslint-disable-next-line no-await-in-loop
       await admin.unsafe(`DROP OWNED BY "${rolname}"`)
@@ -130,7 +134,13 @@ export async function createHarness(): Promise<Harness> {
   // Frozen-clock limiter so rate-limit tests are deterministic (no refill mid-test); reset()
   // clears its buckets between cases so a test's requests never spill into the next.
   const rateLimiter = createRateLimiter(() => 1_000_000)
-  const ctx = createContext(TEST_DB_URL, { kind: 'local', localAdminUrl: ADMIN_URL }, TEST_BLOB_CONFIG, verifier, rateLimiter)
+  const ctx = createContext(
+    TEST_DB_URL,
+    { kind: 'local', localAdminUrl: ADMIN_URL, localDbPrefix: DB_PREFIX },
+    TEST_BLOB_CONFIG,
+    verifier,
+    rateLimiter,
+  )
   // Storage e2e tests upload/download real bytes through MinIO, so the bucket must exist.
   await ctx.blobProvider.ensureBucket()
   const app = createApp(ctx)
@@ -156,7 +166,7 @@ export async function createHarness(): Promise<Harness> {
 
   async function dispose(): Promise<void> {
     await ctx.close()
-    await dropProjectDatabases()
+    await dropDatabasesWithPrefix(ADMIN_URL, DB_PREFIX)
   }
 
   return { ctx, api, mintToken, clientFor, reset, dispose }
