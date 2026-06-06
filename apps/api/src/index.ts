@@ -56,5 +56,5 @@ const app = createApp(ctx, { corsOrigins: env.corsOrigins, devLogin, localAuth }
 app.listen(env.port)
 
 console.log(
-  `🌰 Walnut API listening on http://localhost:${env.port} (provider: ${ctx.provider.kind}, sentry: ${isSentryEnabled() ? 'on' : 'off'})`,
+  `Walnut API listening on http://localhost:${env.port} (provider: ${ctx.provider.kind}, sentry: ${isSentryEnabled() ? 'on' : 'off'})`,
 )

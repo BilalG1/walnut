@@ -58,7 +58,7 @@ async function setup(scopes: ('storage:read' | 'storage:write' | 'storage:delete
 describe('storage — full roundtrip', () => {
   test('upload → download → stat → ls round-trips the bytes through presigned URLs', async () => {
     const { agent } = await setup(['storage:read', 'storage:write'])
-    const bytes = enc('hello walnut storage 🌰')
+    const bytes = enc('hello walnut storage 🎉')
     await put(agent.apiKey, 'docs/hello.txt', bytes, { contentType: 'text/plain' })
 
     // Download: the API hands back a presigned GET; the bytes come straight from the store.

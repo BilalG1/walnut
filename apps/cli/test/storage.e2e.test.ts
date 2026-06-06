@@ -29,7 +29,7 @@ async function tempFile(name: string, content: string): Promise<string> {
 describe('storage cp / ls / cat / stat / rm', () => {
   test('cp uploads a local file; ls/stat/cat then read it back', async () => {
     const { key } = await h.makeAgent({ scopes: ['storage:read', 'storage:write'] })
-    const src = await tempFile('hello.txt', 'hello cli storage 🌰')
+    const src = await tempFile('hello.txt', 'hello cli storage 🎉')
 
     const up = await h.run(['storage', 'cp', src, 'walnut://docs/hello.txt'], { key })
     expect(up.code).toBe(0)
@@ -45,7 +45,7 @@ describe('storage cp / ls / cat / stat / rm', () => {
 
     const cat = await h.run(['storage', 'cat', 'docs/hello.txt'], { key })
     expect(cat.code).toBe(0)
-    expect(cat.stdout).toBe('hello cli storage 🌰')
+    expect(cat.stdout).toBe('hello cli storage 🎉')
   }, 30_000)
 
   test('cp downloads an object to a local file with identical bytes', async () => {

@@ -11,7 +11,7 @@ describe('formatCell', () => {
   })
 
   test('passes text through verbatim, including unicode and control chars', () => {
-    expect(formatCell({ k: 'text', v: 'héllo 世界 🌰' })).toBe('héllo 世界 🌰')
+    expect(formatCell({ k: 'text', v: 'héllo 世界 🎉' })).toBe('héllo 世界 🎉')
     expect(formatCell({ k: 'text', v: 'a\tb\nc' })).toBe('a\tb\nc')
   })
 
