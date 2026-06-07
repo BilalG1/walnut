@@ -11,6 +11,7 @@ import {
   toBranchView,
   toProjectDetail,
   toProjectSummary,
+  toStorageTokenView,
 } from '../serializers.ts'
 import { listProjectActivity } from '../services/activity.ts'
 import {
@@ -33,6 +34,7 @@ import {
   listStorageObjects,
   statObject,
 } from '../services/storage.ts'
+import { createStorageToken, listStorageTokens, revokeStorageToken } from '../services/storage-tokens.ts'
 import { idParams, nameSchema, uuid } from '../validation.ts'
 
 // The branch segment is a plain name (a `text` column), so it stays an unconstrained string;
@@ -252,5 +254,33 @@ export function projectRoutes(ctx: AppContext) {
         return deleteObject(ctx, branch, { path: body.path })
       },
       { params: branchParams, body: t.Object({ path: t.String({ minLength: 1 }) }) },
+    )
+    // ─── Storage "Connect" tokens (owner-level bearer credentials for the /storage/v1 surface) ────
+    // The storage analog of the branch's owner DB connection string: mint a long-lived token a user
+    // plugs into their own app for full read/write/delete on this branch's storage. Authorized by
+    // org membership (getProject). The secret is returned only at creation; the list never has it.
+    .get(
+      '/:id/branches/:branch/storage/tokens',
+      async ({ userId, params }) => {
+        const rows = await listStorageTokens(ctx, params.id, params.branch, userId)
+        return rows.map(toStorageTokenView)
+      },
+      { params: branchParams },
+    )
+    .post(
+      '/:id/branches/:branch/storage/tokens',
+      async ({ userId, params, body }) => {
+        const { token, secret } = await createStorageToken(ctx, params.id, params.branch, userId, { label: body.label })
+        return { ...toStorageTokenView(token), token: secret }
+      },
+      { params: branchParams, body: t.Object({ label: nameSchema }) },
+    )
+    .delete(
+      '/:id/branches/:branch/storage/tokens/:tokenId',
+      async ({ userId, params }) => {
+        await revokeStorageToken(ctx, params.id, params.branch, params.tokenId, userId)
+        return { deleted: true }
+      },
+      { params: t.Object({ id: uuid, branch: t.String(), tokenId: uuid }) },
     )
 }

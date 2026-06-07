@@ -18,6 +18,13 @@ export function newInviteToken(): string {
   return `wln_inv_${randomBytes(24).toString('hex')}`
 }
 
+/** A fresh branch storage token — the owner-level bearer credential a user plugs into their own
+ * app to reach a branch's object storage over `/storage/v1` (the "Connect" feature). Like an agent
+ * key it's shown once and only its hash is stored, so it can never be re-derived after creation. */
+export function newStorageToken(): string {
+  return `wln_st_${randomBytes(24).toString('hex')}`
+}
+
 export function hashKey(key: string): string {
   return createHash('sha256').update(key).digest('hex')
 }

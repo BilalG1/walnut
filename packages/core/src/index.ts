@@ -20,7 +20,17 @@ export type { AgentScope, BranchScope, DbScope, StorageScope, GrantResourceType,
 export { classifySql } from './sql.ts'
 export type { SqlClassification } from './sql.ts'
 
-export { SYSTEM_USER_ID, newId, newAgentKey, newInviteToken, hashKey, keyPrefix, newDatabaseName, uuidv5 } from './ids.ts'
+export {
+  SYSTEM_USER_ID,
+  newId,
+  newAgentKey,
+  newInviteToken,
+  newStorageToken,
+  hashKey,
+  keyPrefix,
+  newDatabaseName,
+  uuidv5,
+} from './ids.ts'
 
 export { createProvider, ProviderError, classifyProviderStatus } from './provider/index.ts'
 export type {

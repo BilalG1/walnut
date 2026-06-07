@@ -41,6 +41,9 @@ export const RESOURCE_LIMITS = {
   /** Pending (unresolved) scope requests per agent. Bounds dashboard-notification
    * spam and metadata growth from a request flood. */
   pendingScopeRequestsPerAgent: 10,
+  /** Owner-level storage "Connect" tokens a single branch may hold. Cheap (pure metadata, only a
+   * hash stored) but bounds credential sprawl — each is a long-lived full-access bearer key. */
+  storageTokensPerBranch: 10,
 } as const
 
 /**
@@ -141,6 +144,10 @@ export const RATE_LIMITS = {
   /** Dashboard storage operations, keyed per user: mirrors {@link storagePerAgent}. The dashboard
    * storage browser mints presigns and lists objects like the agent API; this bounds that rate. */
   dashboardStoragePerUser: { capacity: 100, refillPerSec: 50 },
+  /** Owner storage "Connect" operations over `/storage/v1`, keyed per token: mirrors
+   * {@link storagePerAgent}. A user's own app reads/writes branch storage through this surface; this
+   * clips a runaway loop and bounds presign minting, per credential. */
+  storageConnectPerToken: { capacity: 100, refillPerSec: 50 },
   /** Scope requests, keyed per agent: 20/hour. */
   scopeRequestPerAgent: { capacity: 20, refillPerSec: 20 / 3600 },
   /** Agent key rotation, keyed per agent: 10/hour. */

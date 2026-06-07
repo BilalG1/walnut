@@ -10,6 +10,7 @@ export {
   agentGrants,
   agentGrantScopes,
   branchDbRoles,
+  branchStorageTokens,
   scopeRequests,
   queryEvents,
   storageObjects,
@@ -51,6 +52,8 @@ export type {
   NewStorageObject,
   PhysicalObject,
   NewPhysicalObject,
+  BranchStorageToken,
+  NewBranchStorageToken,
 } from './schema.ts'
 export { openDb } from './client.ts'
 export type { Database, DbHandle, Schema } from './client.ts'

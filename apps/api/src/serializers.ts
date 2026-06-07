@@ -2,6 +2,7 @@ import { type AgentScope, effectiveScopes, RESOURCE_LIMITS, type ScopeWithExpiry
 import type {
   Agent,
   Branch,
+  BranchStorageToken,
   Organization,
   OrganizationInvitation,
   Project,
@@ -325,6 +326,32 @@ export interface BranchDetailView extends BranchView {
 
 export function toBranchDetail(b: Branch): BranchDetailView {
   return { ...toBranchView(b), connectionUri: b.connectionUri }
+}
+
+/** An owner-level storage "Connect" token as shown in the dashboard. Never carries the secret
+ * (only its non-secret prefix); the full token is returned once, separately, at creation. */
+export interface StorageTokenView {
+  id: string
+  label: string
+  keyPrefix: string
+  lastUsedAt: string | null
+  createdAt: string
+}
+
+export function toStorageTokenView(t: BranchStorageToken): StorageTokenView {
+  return {
+    id: t.id,
+    label: t.label,
+    keyPrefix: t.keyPrefix,
+    lastUsedAt: t.lastUsedAt === null ? null : t.lastUsedAt.toISOString(),
+    createdAt: t.createdAt.toISOString(),
+  }
+}
+
+/** A freshly minted storage token: its view plus the plaintext secret, shown to the caller exactly
+ * once (only the hash is stored, so it can never be re-shown). */
+export interface StorageTokenWithSecret extends StorageTokenView {
+  token: string
 }
 
 /** One agent query attempt, as shown in the project activity feed. */
