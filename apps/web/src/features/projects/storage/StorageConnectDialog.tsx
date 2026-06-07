@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { API_URL } from '../../../api.ts'
 import { useCreateStorageToken, useRevokeStorageToken, useStorageTokens } from '../../../data/queries.ts'
 import { timeAgo } from '../../../lib/format.ts'
+import { StorageUsageExamples } from './StorageUsageExamples.tsx'
 
 /** The base URL of the owner-facing storage REST API a user plugs into their own app. Derived from
  * the dashboard's configured API origin — the single place the frontend knows the API lives. */
@@ -24,7 +25,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
     setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <div className="space-y-3">
+    <div className="max-h-[72vh] space-y-3 overflow-y-auto pr-1">
       <p className="text-sm text-fg-secondary">
         Copy these now — the token won&apos;t be shown again. Set them in your application&apos;s environment and
         use any HTTP client against the Walnut storage API.
@@ -34,6 +35,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
           {envBlock(token)}
         </pre>
       </div>
+      <StorageUsageExamples />
       <div className="flex justify-between pt-1">
         <Button variant="ghost" onClick={copy}>
           <Copy size={15} />
@@ -102,13 +104,13 @@ export function StorageConnectDialog({
       {secret !== null ? (
         <TokenReveal token={secret} onDone={() => setSecret(null)} />
       ) : (
-        <div className="space-y-4">
+        <div className="max-h-[72vh] space-y-4 overflow-y-auto pr-1">
           <p className="text-subtle">
             Create a token to reach the <span className="font-mono">{branch}</span> branch&apos;s storage from your
             own application. Each token has full read/write/delete on this branch.{' '}
             <span className="text-faint">
-              This is the Walnut storage REST API, not an S3 endpoint — use any HTTP client or the{' '}
-              <span className="font-mono">walnut</span> CLI.
+              This is the Walnut storage REST API, not an S3 endpoint — use any HTTP client (see the examples
+              below).
             </span>
           </p>
 
@@ -163,6 +165,8 @@ export function StorageConnectDialog({
               </ul>
             )}
           </div>
+
+          <StorageUsageExamples />
         </div>
       )}
     </Dialog>
