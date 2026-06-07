@@ -16,7 +16,7 @@ import { hashKey, keyPrefix, newStorageToken, RESOURCE_LIMITS } from '@walnut/co
 import { type Branch, branches, branchStorageTokens, type BranchStorageToken, type Project } from '@walnut/db'
 import { and, count, desc, eq } from 'drizzle-orm'
 import type { AppContext } from '../context.ts'
-import { limitExceeded, notFound } from '../errors.ts'
+import { HttpError, limitExceeded, notFound } from '../errors.ts'
 import { getProject, getProjectInternal, resolveBranch } from './projects.ts'
 
 /** A freshly minted token: the stored row plus the plaintext, which is returned exactly once. */
@@ -70,7 +70,7 @@ export async function createStorageToken(
     })
     .returning()
   if (token === undefined) {
-    throw notFound('Branch')
+    throw new HttpError(500, { error: 'internal_error', message: 'Failed to create storage token.' })
   }
   return { token, secret }
 }

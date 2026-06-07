@@ -262,6 +262,7 @@ export function projectRoutes(ctx: AppContext) {
     .get(
       '/:id/branches/:branch/storage/tokens',
       async ({ userId, params }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         const rows = await listStorageTokens(ctx, params.id, params.branch, userId)
         return rows.map(toStorageTokenView)
       },
@@ -270,6 +271,7 @@ export function projectRoutes(ctx: AppContext) {
     .post(
       '/:id/branches/:branch/storage/tokens',
       async ({ userId, params, body }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         const { token, secret } = await createStorageToken(ctx, params.id, params.branch, userId, { label: body.label })
         return { ...toStorageTokenView(token), token: secret }
       },
@@ -278,6 +280,7 @@ export function projectRoutes(ctx: AppContext) {
     .delete(
       '/:id/branches/:branch/storage/tokens/:tokenId',
       async ({ userId, params }) => {
+        enforceRate(ctx.rateLimiter, 'dashboardStoragePerUser', userId)
         await revokeStorageToken(ctx, params.id, params.branch, params.tokenId, userId)
         return { deleted: true }
       },

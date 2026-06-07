@@ -393,6 +393,44 @@ export function fetchStorageDownload(projectId: string, branch: string, path: st
   return unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.download.get({ query: { path } }))
 }
 
+// ─── Storage "Connect" tokens ───────────────────────────────────────────────────────────────────
+
+/** The branch's owner-level storage tokens (the Connect dialog's list). Never carries the secret —
+ * only its prefix; the full token is returned once, by {@link useCreateStorageToken}. Gated by
+ * `enabled` so the credential list isn't fetched until the dialog is actually opened. */
+export function useStorageTokens(projectId: string, branch: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: keys.storageTokens(projectId, branch),
+    queryFn: () => unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.tokens.get()),
+    enabled: options?.enabled,
+  })
+}
+
+/** Mint an owner-level storage token for the branch. The response carries the one-time plaintext
+ * token (shown once; only its hash is stored). Refreshes the token list. */
+export function useCreateStorageToken(projectId: string, branch: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (label: string) =>
+      unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.tokens.post({ label })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.storageTokens(projectId, branch) })
+    },
+  })
+}
+
+/** Revoke (delete) a storage token, then refresh the list. The token stops working immediately. */
+export function useRevokeStorageToken(projectId: string, branch: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (tokenId: string) =>
+      unwrap(api.api.projects({ id: projectId }).branches({ branch }).storage.tokens({ tokenId }).delete()),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.storageTokens(projectId, branch) })
+    },
+  })
+}
+
 /** Create a project in the currently-viewed org and refresh that org's list. */
 export function useCreateProject(orgId: string) {
   const qc = useQueryClient()

@@ -45,7 +45,8 @@ export function uuidv5(namespace: string, name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** Non-secret prefix kept for display (e.g. `wln_agt_1a2b…`). */
+/** Non-secret leading slice of a minted secret, kept for display (e.g. `wln_agt_1a2b…` for an agent
+ * key, `wln_st_…` for a storage token). Shared by every `wln_*` credential type. */
 export function keyPrefix(key: string): string {
   return key.slice(0, 12)
 }
