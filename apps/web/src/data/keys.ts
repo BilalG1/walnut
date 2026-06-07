@@ -19,4 +19,6 @@ export const keys = {
       : (['projects', projectId, 'activity', branch] as const),
   storage: (projectId: string, branch: string, prefix: string) =>
     ['projects', projectId, 'branches', branch, 'storage', prefix] as const,
+  storageTokens: (projectId: string, branch: string) =>
+    ['projects', projectId, 'branches', branch, 'storage-tokens'] as const,
 }

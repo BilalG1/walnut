@@ -15,6 +15,7 @@ import { organizationRoutes } from './routes/organizations.ts'
 import { projectRoutes } from './routes/projects.ts'
 import { scopeRequestRoutes } from './routes/scope-requests.ts'
 import { storageApiRoutes } from './routes/storage.ts'
+import { storageConnectRoutes } from './routes/storage-connect.ts'
 
 export interface AppOptions {
   corsOrigins?: string[]
@@ -67,6 +68,7 @@ export function createApp(ctx: AppContext, options: AppOptions = {}) {
     .use(scopeRequestRoutes(ctx))
     .use(agentApiRoutes(ctx))
     .use(storageApiRoutes(ctx))
+    .use(storageConnectRoutes(ctx))
 
   // Mounted for their runtime side effect only; deliberately kept out of the exported
   // `App` type so the auth bootstrap endpoints never become part of the typed client

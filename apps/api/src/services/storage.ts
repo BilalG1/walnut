@@ -522,7 +522,7 @@ export async function commitUpload(
   if (row === undefined || stagedKey === null) {
     throw new HttpError(409, {
       error: 'no_pending_upload',
-      message: `No pending upload for "${input.path}" on this branch. Start one with POST /agent/v1/storage/upload.`,
+      message: `No pending upload for "${input.path}" on this branch. Start one with the storage upload endpoint first.`,
     })
   }
   const head = await ctx.blobProvider.head(stagedKey)

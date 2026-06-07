@@ -244,6 +244,31 @@ export const storageObjects = pgTable(
   ],
 )
 
+/**
+ * Owner-level storage "Connect" tokens — the bearer credential a user plugs into their own
+ * application to reach a single branch's object storage over `/storage/v1`. The storage analog of
+ * the branch's owner database connection URI (full read/write/delete on that one branch, no
+ * scope/approval loop). Like an agent key, only the SHA-256 hash is stored, so a lost token is
+ * rotated by minting a new one and revoking the old — never re-shown. Pure metadata: revoking is a
+ * row delete that simply stops authenticating; nothing in the object store is touched.
+ */
+export const branchStorageTokens = pgTable('branch_storage_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** The branch this token grants storage access to. Cascade removes tokens with the branch. */
+  branchId: uuid('branch_id')
+    .notNull()
+    .references(() => branches.id, { onDelete: 'cascade' }),
+  /** A human label so a user can tell their tokens apart (e.g. "prod app", "ci"). */
+  label: text('label').notNull(),
+  /** SHA-256 of the token; the token itself is shown only once at creation. */
+  keyHash: text('key_hash').notNull().unique(),
+  /** Non-secret leading slice of the token, kept for display in the dashboard. */
+  keyPrefix: text('key_prefix').notNull(),
+  /** Last time the token was used to authenticate a `/storage/v1` request (null = never). */
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  createdAt,
+})
+
 export const agents = pgTable('agents', {
   id: uuid('id').primaryKey().defaultRandom(),
   /** The agent's home organization (its tenancy). An agent acts across the org's
@@ -415,5 +440,7 @@ export type QueryEvent = typeof queryEvents.$inferSelect
 export type NewQueryEvent = typeof queryEvents.$inferInsert
 export type StorageObject = typeof storageObjects.$inferSelect
 export type NewStorageObject = typeof storageObjects.$inferInsert
+export type BranchStorageToken = typeof branchStorageTokens.$inferSelect
+export type NewBranchStorageToken = typeof branchStorageTokens.$inferInsert
 export type PhysicalObject = typeof physicalObjects.$inferSelect
 export type NewPhysicalObject = typeof physicalObjects.$inferInsert

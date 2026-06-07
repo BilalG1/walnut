@@ -1,10 +1,11 @@
-import { GitBranch, HardDrive, Search, Upload } from '@walnut/icons'
+import { GitBranch, HardDrive, KeyRound, Search, Upload } from '@walnut/icons'
 import { Badge, Button, EmptyState, Input, Spinner } from '@walnut/ui'
 import { useRef, useState } from 'react'
 import { useScope } from '../../../app/useScope.ts'
 import { useStorageDelete, useStorageObjects, useStorageUpload } from '../../../data/queries.ts'
 import { PageContainer } from '../../../components/layout/PageContainer.tsx'
 import { type StorageObject } from './common.tsx'
+import { StorageConnectDialog } from './StorageConnectDialog.tsx'
 import { TableView } from './TableView.tsx'
 
 export function StoragePage() {
@@ -21,6 +22,7 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
   const del = useStorageDelete(projectId, branch)
   const [filter, setFilter] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [showConnect, setShowConnect] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const objects: StorageObject[] = data?.objects ?? []
@@ -64,6 +66,10 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
               e.target.value = ''
             }}
           />
+          <Button variant="ghost" onClick={() => setShowConnect(true)}>
+            <KeyRound size={15} />
+            Connect
+          </Button>
           <Button variant="primary" disabled={upload.isPending} onClick={() => fileInput.current?.click()}>
             {upload.isPending ? <Spinner /> : <Upload size={15} />}
             Upload
@@ -101,6 +107,13 @@ function StorageBrowser({ projectId, branch }: { projectId: string; branch: stri
           <TableView {...ctx} />
         )}
       </div>
+
+      <StorageConnectDialog
+        projectId={projectId}
+        branch={branch}
+        open={showConnect}
+        onClose={() => setShowConnect(false)}
+      />
     </PageContainer>
   )
 }

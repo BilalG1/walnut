@@ -18,6 +18,13 @@ export function newInviteToken(): string {
   return `wln_inv_${randomBytes(24).toString('hex')}`
 }
 
+/** A fresh branch storage token — the owner-level bearer credential a user plugs into their own
+ * app to reach a branch's object storage over `/storage/v1` (the "Connect" feature). Like an agent
+ * key it's shown once and only its hash is stored, so it can never be re-derived after creation. */
+export function newStorageToken(): string {
+  return `wln_st_${randomBytes(24).toString('hex')}`
+}
+
 export function hashKey(key: string): string {
   return createHash('sha256').update(key).digest('hex')
 }
@@ -38,7 +45,8 @@ export function uuidv5(namespace: string, name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** Non-secret prefix kept for display (e.g. `wln_agt_1a2b…`). */
+/** Non-secret leading slice of a minted secret, kept for display (e.g. `wln_agt_1a2b…` for an agent
+ * key, `wln_st_…` for a storage token). Shared by every `wln_*` credential type. */
 export function keyPrefix(key: string): string {
   return key.slice(0, 12)
 }
