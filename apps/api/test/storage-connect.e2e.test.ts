@@ -111,6 +111,20 @@ describe('storage connect — the /storage/v1 surface', () => {
     expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(bytes)
   }, 30_000)
 
+  test('a token can delete (tombstone) an object it wrote — write + delete verbs are wired', async () => {
+    const project = await newProject('connect')
+    const { token } = await mintToken(project.id)
+    await putViaToken(token, 'tmp/scratch.txt', enc('disposable'))
+    // Present before delete.
+    const before = await h.api.storage.v1.stat.get({ query: { path: 'tmp/scratch.txt' }, headers: bearer(token) })
+    expect(before.status).toBe(200)
+    // Delete over /storage/v1, then it's gone from the branch's view.
+    const del = await h.api.storage.v1.delete.post({ path: 'tmp/scratch.txt' }, { headers: bearer(token) })
+    expect(del.data).toEqual({ path: 'tmp/scratch.txt', deleted: true })
+    const after = await h.api.storage.v1.stat.get({ query: { path: 'tmp/scratch.txt' }, headers: bearer(token) })
+    expect(after.status).toBe(404)
+  }, 30_000)
+
   test('objects written via a token are visible in the dashboard storage browser (same store)', async () => {
     const project = await newProject('connect')
     const { token } = await mintToken(project.id)

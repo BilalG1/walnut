@@ -348,12 +348,6 @@ export function toStorageTokenView(t: BranchStorageToken): StorageTokenView {
   }
 }
 
-/** A freshly minted storage token: its view plus the plaintext secret, shown to the caller exactly
- * once (only the hash is stored, so it can never be re-shown). */
-export interface StorageTokenWithSecret extends StorageTokenView {
-  token: string
-}
-
 /** One agent query attempt, as shown in the project activity feed. */
 export interface ActivityEventView {
   id: string

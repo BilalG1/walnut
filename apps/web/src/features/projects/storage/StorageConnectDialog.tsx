@@ -102,7 +102,14 @@ export function StorageConnectDialog({
   return (
     <Dialog open={open} onClose={close} title="Connect to storage" className="max-w-lg">
       {secret !== null ? (
-        <TokenReveal token={secret} onDone={() => setSecret(null)} />
+        <TokenReveal
+          token={secret}
+          onDone={() => {
+            // Drop the plaintext from both local state AND the mutation cache so it never lingers.
+            setSecret(null)
+            create.reset()
+          }}
+        />
       ) : (
         <div className="max-h-[72vh] space-y-4 overflow-y-auto pr-1">
           <p className="text-subtle">
