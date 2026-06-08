@@ -1,0 +1,4 @@
+[test]
+# Preload runs before any test file: it clears the HTTP proxy for local-only e2e traffic
+# (Postgres/MinIO). See test/setup.ts for why.
+preload = ["./test/setup.ts"]
