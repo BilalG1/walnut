@@ -10,7 +10,7 @@
 # Environment overrides:
 #   WALNUT_VERSION    Pin a release, e.g. v0.2.0 (default: latest).
 #   WALNUT_INSTALL    Install prefix (default: ~/.walnut). Binary lands in $WALNUT_INSTALL/bin.
-#   WALNUT_REPO       GitHub repo serving the releases (default: walnut-cloud/walnut).
+#   WALNUT_REPO       GitHub repo serving the releases (default: BilalG1/walnut).
 #   WALNUT_BASE_URL   Releases base, GitHub-layout (default: https://github.com/$REPO/releases).
 #                     Override to self-host (e.g. https://dl.walnut.sh/releases).
 #   WALNUT_NO_MODIFY_PATH=1   Don't touch any shell rc file.
@@ -31,7 +31,7 @@ warn()  { printf '%swarning:%s %s\n' "$yellow" "$reset" "$*" >&2; }
 error() { printf '%serror:%s %s\n' "$red" "$reset" "$*" >&2; exit 1; }
 
 # --- config ------------------------------------------------------------------
-REPO="${WALNUT_REPO:-walnut-cloud/walnut}"
+REPO="${WALNUT_REPO:-BilalG1/walnut}"
 INSTALL_DIR="${WALNUT_INSTALL:-$HOME/.walnut}"
 BIN_DIR="$INSTALL_DIR/bin"
 EXE="$BIN_DIR/walnut"

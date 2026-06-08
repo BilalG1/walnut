@@ -1,9 +1,14 @@
 name: release
 
-# Tag a release (e.g. `git tag v0.2.0 && git push --tags`) to cross-compile the
-# walnut CLI and publish the binaries that https://walnut.sh/install downloads.
+# Two ways to cut a CLI release:
+#   - Push to `main`         -> auto-version v0.1.<run#>, published as the "latest" release.
+#                               This is the hands-off path: every deploy ships a fresh CLI that
+#                               https://walnut.sh/install (-> releases/latest/download) picks up.
+#   - Push a tag `vX.Y.Z`    -> uses that exact tag (manual, for intentional version bumps).
+# Either way it cross-compiles the walnut CLI and publishes the binaries to GitHub Releases.
 on:
   push:
+    branches: [main]
     tags: ['v*']
 
 permissions:
@@ -18,10 +23,23 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - name: Resolve version
+        id: ver
+        # A tag push reuses the tag verbatim; a main push synthesizes a monotonic version
+        # from the run number so each deploy is its own "latest" release.
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=v0.1.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build release artifacts
-        run: VERSION="${GITHUB_REF_NAME}" scripts/build-release.sh
+        run: VERSION="${{ steps.ver.outputs.version }}" scripts/build-release.sh
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          make_latest: true
           files: apps/cli/dist/walnut-*
           generate_release_notes: true
