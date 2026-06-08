@@ -1,4 +1,4 @@
-import { DEFAULT_WALNUT_API_URL } from '@walnut/core'
+import { DEFAULT_WALNUT_API_URL } from '@walnut/core/urls'
 import { readCredentials } from './credentials.ts'
 import { EXIT } from './exit.ts'
 import { fail, type CliResult } from './output.ts'
