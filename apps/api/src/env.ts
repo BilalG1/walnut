@@ -46,8 +46,9 @@ function loadBlobConfig(prefix: string | undefined): BlobProviderConfig {
   const region = process.env.STORAGE_REGION?.trim() || 'auto'
   if (kind === 's3') {
     // Production: every value is explicit — no `walnut`/MinIO defaults leak into prod. Addressing
-    // defaults to virtual-hosted (what Railway/Tigris buckets require); set STORAGE_FORCE_PATH_STYLE
-    // for stores that need path-style (a custom-endpoint R2, a remote MinIO).
+    // defaults to virtual-hosted; set STORAGE_FORCE_PATH_STYLE=1 for stores that need path-style:
+    // Railway/Tigris buckets (`t3.storageapi.dev`) — their virtual-hosted addressing fails on the
+    // multi-segment blob keys we use — a custom-endpoint R2, or a remote MinIO.
     return {
       kind,
       endpoint: required('STORAGE_ENDPOINT'),

@@ -7,8 +7,10 @@ import type { BlobHead, BlobProvider, BlobProviderConfig, PresignOptions, Presig
  * exercise the exact same code path. Built on Bun's native `S3Client` (presign/stat/delete), so
  * there is no external AWS SDK dependency.
  *
- * Addressing style is config-driven (`pathStyle`): MinIO needs path-style, Railway/Tigris
- * buckets require virtual-hosted, R2 works with either. Defaults to path-style when unset.
+ * Addressing style is config-driven (`pathStyle`): MinIO and Railway/Tigris buckets
+ * (`t3.storageapi.dev`) need path-style — Tigris virtual-hosted addressing fails on
+ * multi-segment keys (the HEAD surfaces as a bare `UnknownError`); R2 works with either,
+ * real AWS S3 wants virtual-hosted. Defaults to path-style when unset.
  */
 function createS3BlobProvider(config: BlobProviderConfig): BlobProvider {
   const { kind, endpoint, bucket, accessKeyId, secretAccessKey, region = 'auto', pathStyle } = config
